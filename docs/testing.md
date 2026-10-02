@@ -14,3 +14,7 @@ With explicit authorization and a recoverable Radio:
 8. Install StandaloneRadio and verify ordinary HTTP radio playback remains independent of the proxy.
 
 Do not execute step 5 or later without user authorization.
+
+## Current automated result
+
+The supplied Bootlin GCC 8.4.0 toolchain builds all three services as stripped, static ELF32 ARM EABI5 soft-float binaries. QEMU `arm926` executes `sbbase --self-test` successfully. Current file sizes are 37,960 bytes (`sbbase`), 107,640 bytes (`sbwebserver`), and 833,676 bytes (`sbproxy`). The generated ZIP contains only the applet runtime, three binaries, web assets, configuration/catalog fallback, and CA bundle. These results establish build/ABI compatibility only; they are not a substitute for Radio validation.

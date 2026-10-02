@@ -29,3 +29,7 @@ Lua applet using SqueezePlay UDP, DNS resolver, timers and process APIs. It trie
 ## Reuse decision and baseline risks
 
 SBWebserver and SBHttpsProxy are reused directly and remain separate executables. The Python service is ported behaviorally. Time logic belongs in `sbbase`; the Lua implementation remains the reference until native clock-setting tests are complete. Primary risks are exact SqueezePlay streaming-CometD behavior, local loopback server selection, early boot ordering, ARMv5 libcurl/TLS size, and write permission for the RTC. None should be guessed on production hardware.
+
+## Available cross toolchain
+
+`C:/Projects/SBHttpsProxy` contains the hardware-validated Bootlin `armv5-eabi--musl--stable-2020.02-2` toolchain (GCC 8.4.0), CMake 3.31.8, wolfSSL 5.8.2, curl 8.18.0, static install prefixes, and a verified Radio binary. The canonical flags are `-static -Os -marm -march=armv5te -mtune=arm926ej-s -mfloat-abi=soft`. StandaloneBase's ARM script reuses this toolchain and its already-built libcurl/wolfSSL archives without modifying the reference project.

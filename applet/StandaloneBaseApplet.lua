@@ -27,6 +27,7 @@ end
 local function launch(s)
     if alive(s) then return true end
     os.remove(pidPath(s))
+    os.execute("chmod 755 "..ROOT.."/bin/"..s.exe.." >/dev/null 2>&1")
     local cmd="( "..ROOT.."/bin/"..s.exe.." "..s.args.." >>"..RUN.."/"..s.exe..".log 2>&1 & echo $! >"..pidPath(s).." )"
     return os.execute(cmd) == 0
 end

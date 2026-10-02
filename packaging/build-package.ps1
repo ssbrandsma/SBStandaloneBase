@@ -1,0 +1,66 @@
+[CmdletBinding()]
+param(
+    [string]$BaseUrl = 'https://example.invalid/standalonebase',
+    [string]$OutputDirectory
+)
+$ErrorActionPreference = 'Stop'
+$Root = Split-Path $PSScriptRoot -Parent
+$Version = '0.1.0'
+if (-not $OutputDirectory) { $OutputDirectory = Join-Path $Root 'dist' }
+$OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
+$ZipPath = Join-Path $OutputDirectory "StandaloneBase-$Version.zip"
+$Files = [ordered]@{
+    'StandaloneBaseMeta.lua'   = (Join-Path $Root 'applet/StandaloneBaseMeta.lua')
+    'StandaloneBaseApplet.lua' = (Join-Path $Root 'applet/StandaloneBaseApplet.lua')
+    'strings.txt'               = (Join-Path $Root 'applet/strings.txt')
+    'bin/sbbase'                = (Join-Path $Root 'build-arm/sbbase')
+    'bin/sbwebserver'           = (Join-Path $Root 'build-arm/sbwebserver')
+    'bin/sbproxy'               = (Join-Path $Root 'build-arm/sbproxy')
+    'web/index.html'            = (Join-Path $Root 'native/sbwebserver/web/index.html')
+    'web/css/style.css'         = (Join-Path $Root 'native/sbwebserver/web/css/style.css')
+    'web/js/app.js'             = (Join-Path $Root 'native/sbwebserver/web/js/app.js')
+    'config/config.json'        = (Join-Path $Root 'config/config.example.json')
+    'config/catalog.json'       = (Join-Path $Root 'config/catalog.example.json')
+    'certs/cacert.pem'          = (Join-Path $Root 'native/sbproxy/cacert.pem')
+}
+foreach ($Pair in $Files.GetEnumerator()) {
+    if (-not (Test-Path -LiteralPath $Pair.Value -PathType Leaf)) { throw "Missing package input: $($Pair.Value)" }
+}
+New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
+Remove-Item -LiteralPath $ZipPath -Force -ErrorAction SilentlyContinue
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$Archive = [IO.Compression.ZipFile]::Open($ZipPath, [IO.Compression.ZipArchiveMode]::Create)
+try {
+    foreach ($Pair in $Files.GetEnumerator()) {
+        [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($Archive, $Pair.Value, $Pair.Key,
+            [IO.Compression.CompressionLevel]::Optimal) | Out-Null
+    }
+} finally { $Archive.Dispose() }
+$Archive = [IO.Compression.ZipFile]::OpenRead($ZipPath)
+try { $Entries = @($Archive.Entries | Where-Object { -not $_.FullName.EndsWith('/') } | ForEach-Object FullName) }
+finally { $Archive.Dispose() }
+$Expected = @($Files.Keys)
+$Missing = @($Expected | Where-Object { $_ -notin $Entries })
+$Unexpected = @($Entries | Where-Object { $_ -notin $Expected })
+$BadSeparators = @($Entries | Where-Object { $_.Contains([char]92) })
+if ($Missing.Count -or $Unexpected.Count -or $BadSeparators.Count) { throw "Invalid ZIP layout: $($Entries -join ', ')" }
+$Sha1 = (Get-FileHash -LiteralPath $ZipPath -Algorithm SHA1).Hash.ToLowerInvariant()
+$Sha256 = (Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$Url = $BaseUrl.TrimEnd('/') + '/' + [IO.Path]::GetFileName($ZipPath)
+$Xml = @"
+<?xml version="1.0" encoding="UTF-8"?>
+<extensions><details><title lang="EN">StandaloneBase Applet Repository</title></details><applets>
+<applet name="StandaloneBase" version="$Version" target="baby" minTarget="7.7.3" maxTarget="*"><title lang="EN">Standalone Base</title><desc lang="EN">Local infrastructure services for Squeezebox Radio.</desc><changes lang="EN">Initial engineering build; local LMS activation remains disabled pending device validation.</changes><creator>StandaloneBase contributors</creator><url>$Url</url><sha>$Sha1</sha></applet>
+</applets></extensions>
+"@
+$Utf8 = New-Object Text.UTF8Encoding($false)
+$XmlPath = Join-Path $OutputDirectory 'extensions.xml'
+[IO.File]::WriteAllText($XmlPath, $Xml, $Utf8)
+[xml]$Parsed = $Xml
+if ($Parsed.extensions.applets.applet.sha -ne $Sha1) { throw 'Generated metadata validation failed' }
+Write-Host "ZIP: $ZipPath"
+Write-Host "ZIP size: $((Get-Item -LiteralPath $ZipPath).Length) bytes"
+Write-Host "SHA-1: $Sha1"
+Write-Host "SHA-256: $Sha256"
+Write-Host "Entries: $($Entries -join ', ')"

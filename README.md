@@ -14,6 +14,6 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Use `scripts/build-arm.sh` with the Bootlin ARMv5 soft-float toolchain. `scripts/build-package.sh` stages the applet and creates the installer ZIP.
+`scripts/build-arm.sh` automatically reuses the hardware-validated toolchain and static TLS prefix in `C:/Projects/SBHttpsProxy` when run under WSL. Override `SBHTTPSPROXY_ROOT`, `ARM_TOOLCHAIN_DIR`, or `ARM_TLS_PREFIX` for another location. `packaging/build-package.sh` stages the applet and creates the installer ZIP.
 
 See `docs/deployment.md`, `docs/recovery.md`, and `docs/testing.md` before device use.
