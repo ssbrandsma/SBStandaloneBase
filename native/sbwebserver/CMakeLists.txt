@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.10)
+project(sbwebserver C)
+add_executable(sbwebserver src/main.c src/http_server.c src/system_info.c src/settings.c src/applets.c third_party/mongoose.c)
+target_include_directories(sbwebserver PRIVATE src third_party)
+target_compile_definitions(sbwebserver PRIVATE _GNU_SOURCE _POSIX_C_SOURCE=200809L MG_ENABLE_EPOLL=0 MG_ENABLE_POLL=1 MG_ENABLE_DIRLIST=0 MG_ENABLE_SSI=0)
+find_package(Threads REQUIRED)
+target_link_libraries(sbwebserver PRIVATE Threads::Threads)

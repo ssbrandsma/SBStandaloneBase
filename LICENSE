@@ -1,0 +1,7 @@
+StandaloneBase original code is licensed under the MIT License.
+
+Copyright (c) 2026 StandaloneBase contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files, to deal in the Software without restriction, subject to the usual MIT conditions including preservation of this notice. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+
+Vendored components retain their own notices and licenses. SBWebserver and SBHttpsProxy sources were copied from the supplied reference projects; see the adjacent LICENSE files where supplied and their source headers.

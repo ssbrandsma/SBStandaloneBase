@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<extensions>
+  <details><title lang="EN">StandaloneBase</title></details>
+  <applets>
+    <applet name="StandaloneBase" version="0.1.0" target="baby" minTarget="7.7.3" maxTarget="*">
+      <title lang="EN">Standalone Base</title>
+      <desc lang="EN">Local infrastructure services for Squeezebox Radio.</desc>
+      <creator>StandaloneBase contributors</creator>
+    </applet>
+  </applets>
+</extensions>

@@ -1,0 +1,5 @@
+/build-host/
+/build-arm/
+/build-package/
+*.log
+*.pid

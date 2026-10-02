@@ -1,0 +1,3 @@
+STANDALONE_BASE
+	EN	Standalone Base
+	NL	Standalone Basis
