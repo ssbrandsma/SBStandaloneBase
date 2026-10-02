@@ -1,5 +1,5 @@
 {
-  "server": {"name":"StandaloneBase","uuid":"9d989f40-499a-4b85-b92f-8dc415af2a04","host":"0.0.0.0","advertise_ip":"127.0.0.1","http_port":9000,"slimproto_port":3483,"discovery_port":3483,"lms_version":"7.999.999"},
+  "server": {"name":"StandaloneBase","uuid":"9d989f40-499a-4b85-b92f-8dc415af2a04","host":"0.0.0.0","advertise_ip":"auto","http_port":9000,"slimproto_port":3483,"discovery_port":3483,"lms_version":"7.999.999"},
   "catalog": {"url":"https://example.invalid/applets.json","signature_url":"https://example.invalid/applets.json.sig","refresh_hours":24,"production_signed_only":true},
   "services": {"webserver":true,"https_proxy":true,"time_sync":true},
   "time": {"servers":["time.google.com","pool.ntp.org","time.cloudflare.com"],"resync_hours":24}
