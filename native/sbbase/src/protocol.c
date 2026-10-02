@@ -6,7 +6,7 @@
 static const char *value_for(const char tag[5], const sb_config *c, const char *ip) {
     if (!memcmp(tag, "IPAD", 4)) return ip;
     if (!memcmp(tag, "NAME", 4)) return c->name;
-    if (!memcmp(tag, "VERS", 4)) return c->version;
+    if (!memcmp(tag, "VERS", 4)) return c->lms_version;
     if (!memcmp(tag, "UUID", 4)) return c->uuid;
     return NULL;
 }

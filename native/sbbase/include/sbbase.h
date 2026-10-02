@@ -7,9 +7,11 @@
 #define SB_MAX_SLIM_FRAME 65536
 #define SB_MAX_HTTP_HEADER 16384
 #define SB_MAX_HTTP_BODY 131072
+#define SBBASE_VERSION "0.1.0"
+#define SB_LMS_COMPAT_VERSION "7.999.999"
 
 typedef struct {
-    char name[64], uuid[40], version[24], advertise_ip[16];
+    char name[64], uuid[40], lms_version[24], advertise_ip[16];
     char catalog_path[256], state_path[256];
     unsigned http_port, slim_port, discovery_port;
     int time_sync;
