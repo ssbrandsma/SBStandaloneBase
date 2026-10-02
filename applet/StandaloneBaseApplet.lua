@@ -17,6 +17,39 @@ local SERVICES = {
     { name="HTTPS Proxy", exe="sbproxy", args="--listen 127.0.0.1:8765" },
 }
 local started = false
+local BOOTSTRAP_IP_PATTERN = "49%.12%.198%.91"
+local LOCAL_IP = "127.0.0.1"
+local SETTINGS_DIR = "/etc/squeezeplay/userpath/settings"
+local SERVER_SETTINGS = {
+    "ChooseMusicSource.lua",
+    "Playback.lua",
+    "SlimDiscovery.lua",
+}
+
+local function redirectBootstrapServer()
+    for _,name in ipairs(SERVER_SETTINGS) do
+        local path=SETTINGS_DIR.."/"..name
+        local f=io.open(path,"r")
+        if f then
+            local original=f:read("*a"); f:close()
+            local updated,n=original:gsub(BOOTSTRAP_IP_PATTERN,LOCAL_IP)
+            if n > 0 then
+                local backup=path..".pre-standalonebase"
+                local b=io.open(backup,"r")
+                if b then b:close() else
+                    b=io.open(backup,"w")
+                    if b then b:write(original); b:close() end
+                end
+                local tmp=path..".standalonebase.tmp"
+                local out=io.open(tmp,"w")
+                if out then
+                    out:write(updated); out:close()
+                    os.rename(tmp,path)
+                end
+            end
+        end
+    end
+end
 
 local function pidPath(s) return RUN.."/"..s.exe..".pid" end
 local function alive(s)
@@ -44,6 +77,7 @@ end
 function init(self)
     if started then return end; started=true
     os.execute("mkdir -p "..RUN.." /mnt/storage/standalonebase")
+    redirectBootstrapServer()
     self.failures={}; self.backoff={}; self:startServices()
     self.monitor=Timer(15000,function() self:supervise() end); self.monitor:start()
 end
