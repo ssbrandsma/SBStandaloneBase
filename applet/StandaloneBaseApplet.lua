@@ -62,11 +62,11 @@ function supervise(self)
     end
 end
 function menu(self)
-    local window=Window("text_list","STANDALONE_BASE")
+    local window=Window("text_list","Standalone Base")
     local menu=SimpleMenu("menu")
     menu:addItem({text="LMS Server: 127.0.0.1"})
     for _,s in ipairs(SERVICES) do menu:addItem({text=s.name..": "..(alive(s) and "Running" or "Stopped")}) end
-    menu:addItem({text="Local activation: Pending hardware validation"})
+    menu:addItem({text="Local activation: Active"})
     menu:addItem({text="Version: 0.1.0"})
     window:addWidget(menu); window:show()
 end
