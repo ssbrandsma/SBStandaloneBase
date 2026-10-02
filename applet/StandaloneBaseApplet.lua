@@ -23,19 +23,22 @@ local function alive(s)
     local f=io.open(pidPath(s),"r"); if not f then return false end
     local pid=tonumber(f:read("*l")); f:close()
     if not pid then return false end
-    return os.execute("kill -0 "..tostring(pid).." >/dev/null 2>&1") == 0
+    local exe=ROOT.."/bin/"..s.exe
+    return os.execute("test -r /proc/"..tostring(pid).."/cmdline && grep -q '^"..exe.."' /proc/"..tostring(pid).."/cmdline 2>/dev/null") == 0
 end
 local function launch(s)
     if alive(s) then return true end
     os.remove(pidPath(s))
     os.execute("chmod 755 "..ROOT.."/bin/"..s.exe.." >/dev/null 2>&1")
-    local cmd="( "..ROOT.."/bin/"..s.exe.." "..s.args.." >>"..RUN.."/"..s.exe..".log 2>&1 & echo $! >"..pidPath(s).." )"
-    return os.execute(cmd) == 0
+    local cmd="( "..ROOT.."/bin/"..s.exe.." "..s.args.." >>"..RUN.."/"..s.exe..".log 2>&1 & pid=$!; "..
+        "sleep 1; if kill -0 $pid >/dev/null 2>&1; then echo $pid >"..pidPath(s).."; else rm -f "..pidPath(s).."; fi )"
+    os.execute(cmd)
+    return alive(s)
 end
 local function stop(s)
     local f=io.open(pidPath(s),"r"); if not f then return end
     local pid=tonumber(f:read("*l")); f:close()
-    if pid then os.execute("kill "..tostring(pid).." >/dev/null 2>&1") end
+    if pid and alive(s) then os.execute("kill "..tostring(pid).." >/dev/null 2>&1") end
     os.remove(pidPath(s))
 end
 function init(self)
