@@ -1,11 +1,11 @@
 [CmdletBinding()]
 param(
-    [string]$BaseUrl = 'https://example.invalid/standalonebase',
+    [string]$BaseUrl = 'http://49.12.198.91/sbstandalonebase',
     [string]$OutputDirectory
 )
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path $PSScriptRoot -Parent
-$Version = '0.1.0'
+$Version = '0.2.0'
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $Root 'dist' }
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $ZipPath = Join-Path $OutputDirectory "StandaloneBase-$Version.zip"
@@ -51,7 +51,7 @@ $Url = $BaseUrl.TrimEnd('/') + '/' + [IO.Path]::GetFileName($ZipPath)
 $Xml = @"
 <?xml version="1.0" encoding="UTF-8"?>
 <extensions><details><title lang="EN">StandaloneBase Applet Repository</title></details><applets>
-<applet name="StandaloneBase" version="$Version" target="baby" minTarget="7.7.3" maxTarget="*"><title lang="EN">Standalone Base</title><desc lang="EN">Local infrastructure services for Squeezebox Radio.</desc><changes lang="EN">Initial engineering build; local LMS activation remains disabled pending device validation.</changes><creator>StandaloneBase contributors</creator><url>$Url</url><sha>$Sha1</sha></applet>
+<applet name="StandaloneBase" version="$Version" target="baby" minTarget="7.7.3" maxTarget="*"><title lang="EN">Standalone Base</title><desc lang="EN">Local LMS-compatible infrastructure services for Squeezebox Radio.</desc><changes lang="EN">Activate the local server, complete Radio bootstrap compatibility, and migrate the former remote bootstrap endpoint to localhost.</changes><creator>Sjoerd Brandsma</creator><url>$Url</url><sha>$Sha1</sha></applet>
 </applets></extensions>
 "@
 $Utf8 = New-Object Text.UTF8Encoding($false)
