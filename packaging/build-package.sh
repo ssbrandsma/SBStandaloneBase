@@ -2,7 +2,7 @@
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 stage="$root/build-package/StandaloneBase"
-zipfile="$root/build-package/StandaloneBase-0.1.0.zip"
+zipfile="$root/build-package/StandaloneBase-0.2.0.zip"
 rm -rf "$stage"
 mkdir -p "$stage/bin" "$stage/web" "$stage/config"
 cp "$root/applet/StandaloneBaseMeta.lua" "$root/applet/StandaloneBaseApplet.lua" "$root/applet/strings.txt" "$stage/"
