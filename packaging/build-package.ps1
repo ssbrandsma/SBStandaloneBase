@@ -5,7 +5,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path $PSScriptRoot -Parent
-$Version = '0.2.0'
+$Version = '0.2.1'
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $Root 'dist' }
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $ZipPath = Join-Path $OutputDirectory "StandaloneBase-$Version.zip"
@@ -32,26 +32,38 @@ Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $Archive = [IO.Compression.ZipFile]::Open($ZipPath, [IO.Compression.ZipArchiveMode]::Create)
 try {
+    # SqueezePlay's legacy zipfilter does not create parent directories for a
+    # file entry. Keep explicit directory entries ahead of nested files.
+    foreach ($Directory in @('bin/', 'web/', 'web/css/', 'web/js/', 'config/', 'certs/')) {
+        $Archive.CreateEntry($Directory) | Out-Null
+    }
     foreach ($Pair in $Files.GetEnumerator()) {
         [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($Archive, $Pair.Value, $Pair.Key,
             [IO.Compression.CompressionLevel]::Optimal) | Out-Null
     }
 } finally { $Archive.Dispose() }
 $Archive = [IO.Compression.ZipFile]::OpenRead($ZipPath)
-try { $Entries = @($Archive.Entries | Where-Object { -not $_.FullName.EndsWith('/') } | ForEach-Object FullName) }
+try {
+    $AllEntries = @($Archive.Entries | ForEach-Object FullName)
+    $Entries = @($AllEntries | Where-Object { -not $_.EndsWith('/') })
+}
 finally { $Archive.Dispose() }
 $Expected = @($Files.Keys)
 $Missing = @($Expected | Where-Object { $_ -notin $Entries })
 $Unexpected = @($Entries | Where-Object { $_ -notin $Expected })
 $BadSeparators = @($Entries | Where-Object { $_.Contains([char]92) })
-if ($Missing.Count -or $Unexpected.Count -or $BadSeparators.Count) { throw "Invalid ZIP layout: $($Entries -join ', ')" }
+$RequiredDirectories = @('bin/', 'web/', 'web/css/', 'web/js/', 'config/', 'certs/')
+$MissingDirectories = @($RequiredDirectories | Where-Object { $_ -notin $AllEntries })
+if ($Missing.Count -or $Unexpected.Count -or $BadSeparators.Count -or $MissingDirectories.Count) {
+    throw "Invalid ZIP layout: $($AllEntries -join ', ')"
+}
 $Sha1 = (Get-FileHash -LiteralPath $ZipPath -Algorithm SHA1).Hash.ToLowerInvariant()
 $Sha256 = (Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $Url = $BaseUrl.TrimEnd('/') + '/' + [IO.Path]::GetFileName($ZipPath)
 $Xml = @"
 <?xml version="1.0" encoding="UTF-8"?>
 <extensions><details><title lang="EN">StandaloneBase Applet Repository</title></details><applets>
-<applet name="StandaloneBase" version="$Version" target="baby" minTarget="7.7.3" maxTarget="*"><title lang="EN">Standalone Base</title><desc lang="EN">Local LMS-compatible infrastructure services for Squeezebox Radio.</desc><changes lang="EN">Activate the local server, complete Radio bootstrap compatibility, and migrate the former remote bootstrap endpoint to localhost.</changes><creator>Sjoerd Brandsma</creator><url>$Url</url><sha>$Sha1</sha></applet>
+<applet name="StandaloneBase" version="$Version" target="baby" minTarget="7.7.3" maxTarget="*"><title lang="EN">Standalone Base</title><desc lang="EN">Local LMS-compatible infrastructure services for Squeezebox Radio.</desc><changes lang="EN">Fix installation on stock Radio firmware by including legacy-compatible ZIP directory entries.</changes><creator>Sjoerd Brandsma</creator><url>$Url</url><sha>$Sha1</sha></applet>
 </applets></extensions>
 "@
 $Utf8 = New-Object Text.UTF8Encoding($false)

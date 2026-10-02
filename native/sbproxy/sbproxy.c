@@ -16,7 +16,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define VERSION "0.2.0"
+#define VERSION "0.2.1"
 
 #define MAX_REQUEST 16384
 #define MAX_HEADERS 32768
