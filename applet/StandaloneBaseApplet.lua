@@ -5,6 +5,7 @@ local SimpleMenu = require("jive.ui.SimpleMenu")
 local Window = require("jive.ui.Window")
 local Timer = require("jive.ui.Timer")
 local io, os, tonumber, tostring = io, os, tonumber, tostring
+local ipairs, pairs, math = ipairs, pairs, math
 module(..., Framework.constants)
 oo.class(_M, Applet)
 
@@ -72,3 +73,5 @@ function free(self)
     for i=#SERVICES,1,-1 do stop(SERVICES[i]) end
     started=false; return true
 end
+
+return _M

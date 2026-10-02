@@ -18,3 +18,5 @@ Do not execute step 5 or later without user authorization.
 ## Current automated result
 
 The supplied Bootlin GCC 8.4.0 toolchain builds all three services as stripped, static ELF32 ARM EABI5 soft-float binaries. QEMU `arm926` executes `sbbase --self-test` successfully. Current file sizes are 37,960 bytes (`sbbase`), 107,640 bytes (`sbwebserver`), and 833,676 bytes (`sbproxy`). The generated ZIP contains only the applet runtime, three binaries, web assets, configuration/catalog fallback, and CA bundle. These results establish build/ABI compatibility only; they are not a substitute for Radio validation.
+
+On 2026-10-02 the package was installed on a stock 7.7.3 r16676 Radio at the user's direction. Native ARM execution, TCP 3483/9000, UDP discovery, HTTP health, Bayeux handshake, loopback proxy health, applet registration, and process startup passed. Measured idle RSS was approximately 96 KiB for `sbbase` and 220 KiB for `sbproxy`. The existing standalone `sbwebserver` remained on port 80, so the bundled webserver detected the conflict and exited without disturbing the other services. Local LMS selection was not changed.

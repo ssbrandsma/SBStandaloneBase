@@ -1,15 +1,16 @@
 local oo = require("loop.simple")
 local AppletMeta = require("jive.AppletMeta")
-local _ = require("jive.i18n")
-module(..., oo.class(AppletMeta))
+local appletManager = appletManager
+local jiveMain = jiveMain
+module(...)
+oo.class(_M, AppletMeta)
 
 function jiveVersion(meta) return 1, 1 end
 function defaultSettings(meta) return { enabled = true } end
 function registerApplet(meta)
+    local applet = appletManager:loadApplet("StandaloneBase")
     jiveMain:addItem(meta:menuItem("standaloneBase", "home", "STANDALONE_BASE",
-        function(applet) applet:menu() end, 90))
+        function() applet:menu() end, 90))
 end
-function configureApplet(meta)
-    local applet = meta:loadApplet()
-    applet:init()
-end
+
+return _M
