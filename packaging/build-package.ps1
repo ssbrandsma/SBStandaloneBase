@@ -21,7 +21,7 @@ $Files = [ordered]@{
     'index.html'                = (Join-Path $Root 'native/sbwebserver/web/index.html')
     'style.css'                 = (Join-Path $Root 'native/sbwebserver/web/css/style.css')
     'app.js'                    = (Join-Path $Root 'native/sbwebserver/web/js/app.js')
-    'config.json'               = (Join-Path $Root 'config/config.example.json')
+    'config.json'               = (Join-Path $Root 'config.json')
     'catalog.json'              = (Join-Path $Root 'config/catalog.example.json')
     'cacert.pem'                = (Join-Path $Root 'native/sbproxy/cacert.pem')
 }

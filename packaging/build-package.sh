@@ -10,7 +10,7 @@ cp "$root/build-arm/sbbase" "$root/build-arm/sbwebserver" "$root/build-arm/sbpro
 cp "$root/native/sbwebserver/web/index.html" "$stage/index.html"
 cp "$root/native/sbwebserver/web/css/style.css" "$stage/style.css"
 cp "$root/native/sbwebserver/web/js/app.js" "$stage/app.js"
-cp "$root/config/config.example.json" "$stage/config.json"
+cp "$root/config.json" "$stage/config.json"
 cp "$root/config/catalog.example.json" "$stage/catalog.json"
 cp "$root/native/sbproxy/cacert.pem" "$stage/cacert.pem"
 chmod 0755 "$stage/sbbase" "$stage/sbwebserver" "$stage/sbproxy" "$stage/sb-storage-helper"

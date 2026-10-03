@@ -12,10 +12,12 @@ oo.class(_M, Applet)
 
 local ROOT = "/usr/share/jive/applets/StandaloneBase"
 local RUN = "/tmp/standalonebase"
+local CONFIG = "/mnt/storage/standalonebase/config.json"
+local REMOTE_CONFIG = "http://127.0.0.1:8765/https/raw.githubusercontent.com/ssbrandsma/SBStandaloneBase/master/config.json"
 local SERVICES = {
-    { name="Bootstrap service", exe="sbbase", args="--config /mnt/storage/standalonebase/config.json" },
-    { name="Webserver", exe="sbwebserver", args="--web-root "..ROOT.." --config-dir /mnt/storage/standalonebase" },
     { name="HTTPS Proxy", exe="sbproxy", args="--listen 127.0.0.1:8765" },
+    { name="Bootstrap service", exe="sbbase", args="--config "..CONFIG },
+    { name="Webserver", exe="sbwebserver", args="--web-root "..ROOT.." --config-dir /mnt/storage/standalonebase" },
 }
 local started = false
 local storage = StorageManager:new(ROOT)
@@ -76,11 +78,31 @@ local function stop(s)
     if pid and alive(s) then os.execute("kill "..tostring(pid).." >/dev/null 2>&1") end
     os.remove(pidPath(s))
 end
+local function refreshConfig()
+    local f=io.open(CONFIG,"r")
+    if f then f:close() else os.execute("cp "..ROOT.."/config.json "..CONFIG) end
+    local tmp=RUN.."/config.json.download"
+    os.remove(tmp)
+    local ok=os.execute("wget -q -T 20 -O "..tmp.." "..REMOTE_CONFIG)
+    if ok == 0 then
+        local c=io.open(tmp,"r")
+        local body=c and c:read("*a") or ""
+        if c then c:close() end
+        if body:find('"StandaloneRadio"',1,true) and body:find('"SpotifyConnect"',1,true) then
+            os.rename(tmp,CONFIG)
+            return
+        end
+    end
+    os.remove(tmp)
+end
 function init(self)
     if started then return end; started=true
     os.execute("mkdir -p "..RUN.." /mnt/storage/standalonebase")
     redirectBootstrapServer()
-    self.failures={}; self.backoff={}; self:startServices()
+    self.failures={}; self.backoff={}
+    launch(SERVICES[1])
+    refreshConfig()
+    for i=2,#SERVICES do if not launch(SERVICES[i]) then self.failures[SERVICES[i].exe]=1 end end
     self.monitor=Timer(15000,function() self:supervise() end); self.monitor:start()
 end
 function startServices(self)

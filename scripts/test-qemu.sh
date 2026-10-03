@@ -10,6 +10,10 @@ for binary in sbbase sbwebserver sbproxy sb-storage-helper; do
 done
 "$runner" -cpu arm926 "$root/build-arm/sbbase" --self-test
 "$runner" -cpu arm926 "$root/build-arm/sbbase" --version
+catalog=$("$runner" -cpu arm926 "$root/build-arm/sbbase" --check-config "$root/config.json")
+echo "$catalog" | grep -q '"count":2'
+echo "$catalog" | grep -q '"title": "Standalone Radio"'
+echo "$catalog" | grep -q '"title": "Standalone Spotify"'
 "$runner" -cpu arm926 "$root/build-arm/sb-storage-helper" info >/dev/null
 if test -f "$root/artifacts/ubi/ubifs-test-w4-r0.img"; then
   "$runner" -cpu arm926 "$root/build-arm/sb-storage-helper" inspect-superblock \

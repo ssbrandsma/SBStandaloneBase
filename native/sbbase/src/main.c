@@ -21,6 +21,7 @@ static int player_connected;
 static char player_id[18];
 static client *comet_stream;
 static char comet_client_id[32];
+static char catalog_data[1600]="{\"count\":0,\"item_loop\":[]}";
 static sb_config *active_config;
 static volatile sig_atomic_t running = 1;
 static void stop(int sig) { (void)sig; running = 0; }
@@ -53,12 +54,14 @@ static int json_string(const char *body,const char *key,char *out,size_t cap){co
 static int json_raw(const char *body,const char *key,char *out,size_t cap){const char*p=strstr(body,key),*start;size_t n;if(!p||cap<2)return 0;p+=strlen(key);while(*p==' '||*p=='\t'||*p==':')p++;start=p;if(*p=='\"'){for(p++;*p&&*p!='\"';p++)if(*p=='\\'&&p[1])p++;if(*p=='\"')p++;}else while(*p&&*p!=','&&*p!='}'&&*p!=']'&&*p!=' '&&*p!='\t'&&*p!='\r'&&*p!='\n')p++;n=(size_t)(p-start);if(!n||n>=cap)return 0;memcpy(out,start,n);out[n]=0;return 1;}
 static int before(const char *start,const char *needle,const char *end){const char*p=strstr(start,needle);return p&&p<end;}
 static void add_json(char*out,size_t cap,size_t*used,const char*json){size_t n=strlen(json);if(*used+n+2>=cap)return;if(*used>1)out[(*used)++]=',';memcpy(out+*used,json,n);*used+=n;out[*used]=0;}
+static int load_catalog(const char*path){FILE*f;char*b,*p,*start;long size;size_t used=0;int count=0,depth,in_string,escape;if(!path||!(f=fopen(path,"rb")))return -1;if(fseek(f,0,SEEK_END)||((size=ftell(f))<2)||size>65536||fseek(f,0,SEEK_SET)){fclose(f);return -1;}b=malloc((size_t)size+1);if(!b){fclose(f);return -1;}if(fread(b,1,(size_t)size,f)!=(size_t)size){free(b);fclose(f);return -1;}fclose(f);b[size]=0;p=strstr(b,"\"applets\"");if(!p||(p=strchr(p,'['))==NULL){free(b);return -1;}strcpy(catalog_data,"{\"count\":0,\"item_loop\":[");used=strlen(catalog_data);for(p++;*p&&*p!=']';){while(*p&&*p!='{'&&*p!=']')p++;if(*p!='{')break;start=p;depth=0;in_string=escape=0;do{char ch=*p++;if(in_string){if(escape)escape=0;else if(ch=='\\')escape=1;else if(ch=='\"')in_string=0;}else if(ch=='\"')in_string=1;else if(ch=='{')depth++;else if(ch=='}')depth--;}while(*p&&depth);if(depth||used+(size_t)(p-start)+4>=sizeof catalog_data){free(b);return -1;}if(count)catalog_data[used++]=',';memcpy(catalog_data+used,start,(size_t)(p-start));used+=(size_t)(p-start);catalog_data[used]=0;count++;}if(used+3>=sizeof catalog_data){free(b);return -1;}catalog_data[used++]=']';catalog_data[used++]='}';catalog_data[used]=0;{char prefix[32];size_t old=strlen("{\"count\":0");snprintf(prefix,sizeof prefix,"{\"count\":%d",count);if(strlen(prefix)!=old){free(b);return -1;}memcpy(catalog_data,prefix,old);}free(b);return count;}
 static void request_responses(const char*body,const sb_config*cfg,char*out,size_t cap){
     const char*p=body,*next;size_t used=1;char id[32],reply[160],msg[2300],data[1700];out[0]='[';out[1]=0;
     while((p=strstr(p,"\"id\""))!=NULL){next=strstr(p+4,"\"id\"");if(!next)next=p+strlen(p);id[0]=0;reply[0]=0;json_raw(p,"\"id\"",id,sizeof id);json_string(p,"\"response\"",reply,sizeof reply);if(!id[0]||!reply[0]){p+=4;continue;}
         if(before(p,"serverstatus",next))snprintf(data,sizeof data,"{\"httpport\":\"%u\",\"ip\":\"%s\",\"version\":\"%s\",\"uuid\":\"%s\",\"player count\":%d,\"players_loop\":%s}",cfg->http_port,cfg->advertise_ip,cfg->lms_version,cfg->uuid,player_id[0]?1:0,player_id[0]?"PLAYER":"[]");
         else if(before(p,"firmwareupgrade",next))strcpy(data,"{\"firmwareupgrade\":0,\"player_needs_upgrade\":0,\"player_is_upgrading\":0}");
         else if(before(p,"\"date\"",next))snprintf(data,sizeof data,"{\"date_epoch\":%lu,\"date\":\"0000-00-00T00:00:00+00:00\"}",(unsigned long)time(NULL));
+        else if(before(p,"jiveapplets",next))snprintf(data,sizeof data,"%s",catalog_data);
         else if(before(p,"\"status\"",next))snprintf(data,sizeof data,"{\"player_name\":\"Standalone\",\"player_connected\":1,\"power\":1,\"mode\":\"stop\",\"time\":0,\"duration\":0,\"playlist_tracks\":0,\"playlist_cur_index\":0,\"mixer volume\":50,\"digital_volume_control\":1,\"player_needs_upgrade\":0,\"player_is_upgrading\":0,\"seq_no\":0}");
         else strcpy(data,"{\"count\":0,\"offset\":0,\"item_loop\":[]}");
         if(strstr(data,"PLAYER")){char player[900],*mark=strstr(data,"PLAYER");snprintf(player,sizeof player,"[{\"playerindex\":\"0\",\"playerid\":\"%s\",\"name\":\"Standalone\",\"model\":\"baby\",\"modelname\":\"Squeezebox Radio\",\"isplayer\":1,\"connected\":%d,\"power\":1,\"firmware\":\"7.7.3\",\"ip\":\"127.0.0.1\",\"seq_no\":0,\"displaytype\":\"none\",\"isplaying\":0,\"canpoweroff\":1}]",player_id,player_connected);memmove(mark+strlen(player),mark+6,strlen(mark+6)+1);memcpy(mark,player,strlen(player));}
@@ -90,6 +93,8 @@ static void defaults(sb_config*c){memset(c,0,sizeof *c);strcpy(c->name,"Standalo
 int main(int argc,char**argv){sb_config cfg;int udp,tcp,http,i;client cs[CLIENTS];struct pollfd pf[3+CLIENTS];defaults(&cfg);active_config=&cfg;
     if(argc==2&&!strcmp(argv[1],"--version")){printf("sbbase %s (LMS compatibility %s)\n",SBBASE_VERSION,cfg.lms_version);return 0;}
     if(argc==2&&!strcmp(argv[1],"--self-test")){unsigned char q[]={'e','N','A','M','E',0},o[96];return sb_discovery_response(q,sizeof q,o,sizeof o,&cfg,"127.0.0.1")?0:2;}
+    if(argc==3&&!strcmp(argv[1],"--check-config")){if(load_catalog(argv[2])<0)return 2;puts(catalog_data);return 0;}
+    if(argc==3&&!strcmp(argv[1],"--config")){snprintf(cfg.catalog_path,sizeof cfg.catalog_path,"%s",argv[2]);if(load_catalog(argv[2])<0){fprintf(stderr,"invalid or unreadable config: %s\n",argv[2]);return 2;}}
     signal(SIGINT,stop);signal(SIGTERM,stop);
     udp=listener(SOCK_DGRAM,cfg.discovery_port);tcp=listener(SOCK_STREAM,cfg.slim_port);http=listener(SOCK_STREAM,cfg.http_port);if(udp<0||tcp<0||http<0){perror("listener");return 1;}for(i=0;i<CLIENTS;i++)cs[i].fd=-1;fprintf(stderr,"sbbase %s (LMS %s): %s UDP/TCP %u, HTTP %u\n",SBBASE_VERSION,cfg.lms_version,cfg.advertise_ip,cfg.slim_port,cfg.http_port);
     while(running){int count=3;pf[0]=(struct pollfd){udp,POLLIN,0};pf[1]=(struct pollfd){tcp,POLLIN,0};pf[2]=(struct pollfd){http,POLLIN,0};for(i=0;i<CLIENTS;i++)if(cs[i].fd>=0)pf[count++]=(struct pollfd){cs[i].fd,POLLIN,0};if(poll(pf,(nfds_t)count,1000)<0){if(errno==EINTR)continue;break;}
