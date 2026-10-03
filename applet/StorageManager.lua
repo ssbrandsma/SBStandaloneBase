@@ -11,11 +11,15 @@ local function parse(stream)
     end
     return result
 end
-function Manager:getStorageInfo()
-    local p=io.popen(self.root.."/sb-storage-helper info 2>/dev/null","r")
+function Manager:_run(command)
+    local p=io.popen(self.root.."/sb-storage-helper "..command.." 2>/dev/null","r")
     if not p then return {compatible="false",reason="helper_unavailable"} end
     local result=parse(p); p:close(); return result
 end
+function Manager:getStorageInfo() return self:_run("info") end
+function Manager:getStorageStatus() return self:_run("storage-status") end
+function Manager:getStoragePreparation() return self:_run("prepare") end
+function Manager:verifyStorage() return self:_run("verify") end
 function Manager:getCompatibility()
     local i=self:getStorageInfo()
     return {supported=i.compatible=="true",reason=i.reason or "unknown"}

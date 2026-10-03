@@ -18,6 +18,7 @@ $Files = [ordered]@{
     'sbwebserver'               = (Join-Path $Root 'build-arm/sbwebserver')
     'sbproxy'                   = (Join-Path $Root 'build-arm/sbproxy')
     'sb-storage-helper'         = (Join-Path $Root 'build-arm/sb-storage-helper')
+    'sbdata-boot.sh'            = (Join-Path $Root 'scripts/sbdata-boot.sh')
     'index.html'                = (Join-Path $Root 'native/sbwebserver/web/index.html')
     'style.css'                 = (Join-Path $Root 'native/sbwebserver/web/css/style.css')
     'app.js'                    = (Join-Path $Root 'native/sbwebserver/web/js/app.js')
