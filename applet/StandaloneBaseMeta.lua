@@ -8,6 +8,8 @@ oo.class(_M, AppletMeta)
 function jiveVersion(meta) return 1, 1 end
 function defaultSettings(meta) return { enabled = true } end
 function registerApplet(meta)
+    meta:registerService("getStandaloneStorageInfo")
+    meta:registerService("getStandaloneStorageCompatibility")
     local applet = appletManager:loadApplet("StandaloneBase")
     jiveMain:addItem(meta:menuItem("standaloneBase", "home", "STANDALONE_BASE",
         function() applet:menu() end, 90))

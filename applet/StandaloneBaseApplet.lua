@@ -4,6 +4,7 @@ local Framework = require("jive.ui.Framework")
 local SimpleMenu = require("jive.ui.SimpleMenu")
 local Window = require("jive.ui.Window")
 local Timer = require("jive.ui.Timer")
+local StorageManager = require("applets.StandaloneBase.StorageManager")
 local io, os, tonumber, tostring = io, os, tonumber, tostring
 local ipairs, pairs, math = ipairs, pairs, math
 module(..., Framework.constants)
@@ -17,6 +18,7 @@ local SERVICES = {
     { name="HTTPS Proxy", exe="sbproxy", args="--listen 127.0.0.1:8765" },
 }
 local started = false
+local storage = StorageManager:new(ROOT)
 local BOOTSTRAP_IP_PATTERN = "49%.12%.198%.91"
 local LOCAL_IP = "127.0.0.1"
 local SETTINGS_DIR = "/etc/squeezeplay/userpath/settings"
@@ -99,9 +101,25 @@ function menu(self)
     local window=Window("text_list","Standalone Base")
     local menu=SimpleMenu("menu")
     for _,s in ipairs(SERVICES) do menu:addItem({text=s.name..": "..(alive(s) and "Running" or "Stopped")}) end
+    menu:addItem({text="Storage",callback=function() self:storageMenu() end})
     menu:addItem({text="Version: 0.2.2"})
     window:addWidget(menu); window:show()
 end
+local function mib(v) return string.format("%.1f MiB",(tonumber(v) or 0)/1048576) end
+function storageMenu(self)
+    local i=storage:getStorageInfo()
+    local window=Window("text_list","Storage")
+    local menu=SimpleMenu("menu")
+    menu:addItem({text="Used: "..mib((i.filesystem_total_bytes or 0)-(i.filesystem_free_bytes or 0))})
+    menu:addItem({text="Available: "..mib(i.filesystem_free_bytes)})
+    menu:addItem({text="Total: "..mib(i.filesystem_total_bytes)})
+    menu:addItem({text="Flash expansion: "..(i.compatible=="true" and "Supported (disabled)" or "Unavailable")})
+    menu:addItem({text="Target: "..mib(i.target_bytes)})
+    menu:addItem({text="Expansion requires validation and backup"})
+    window:addWidget(menu); window:show()
+end
+function getStandaloneStorageInfo(self) return storage:getStorageInfo() end
+function getStandaloneStorageCompatibility(self) return storage:getCompatibility() end
 function free(self)
     if self.monitor then self.monitor:stop() end
     for _,t in pairs(self.backoff or {}) do t:stop() end
