@@ -124,7 +124,7 @@ function menu(self)
     local menu=SimpleMenu("menu")
     for _,s in ipairs(SERVICES) do menu:addItem({text=s.name..": "..(alive(s) and "Running" or "Stopped")}) end
     menu:addItem({text="Storage",callback=function() self:storageMenu() end})
-    menu:addItem({text="Version: 0.2.2"})
+    menu:addItem({text="Version: 0.2.3"})
     window:addWidget(menu); window:show()
 end
 local function mib(v) return string.format("%.1f MiB",(tonumber(v) or 0)/1048576) end
