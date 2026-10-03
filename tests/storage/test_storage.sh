@@ -39,6 +39,26 @@ printf '0\n' >"$fixture/sys/class/ubi/ubi0/ubi0_2/corrupted"
 printf 'x86_64\n' >"$fixture/proc/sys/kernel/architecture"
 set +e; out=$(run check); status=$?; set -e
 test "$status" = 2; echo "$out" | grep -q '^reason=unsupported_architecture$'
+printf 'armv5tejl\n' >"$fixture/proc/sys/kernel/architecture"
+printf '1\n' >"$fixture/sys/class/ubi/ubi0/avail_eraseblocks"
+set +e; out=$(run check); status=$?; set -e
+test "$status" = 2; echo "$out" | grep -q '^reason=insufficient_capacity$'
+printf '660\n' >"$fixture/sys/class/ubi/ubi0/avail_eraseblocks"
+printf 'Hardware : Unknown Board\n' >"$fixture/proc/cpuinfo"
+set +e; out=$(run check); status=$?; set -e
+test "$status" = 2; echo "$out" | grep -q '^reason=unsupported_model$'
+printf 'Hardware : Baby\n' >"$fixture/proc/cpuinfo"
+mkdir "$fixture/sys/class/ubi/ubi0/ubi0_6"
+printf 'mystery\n' >"$fixture/sys/class/ubi/ubi0/ubi0_6/name"
+set +e; out=$(run check); status=$?; set -e
+test "$status" = 2; echo "$out" | grep -q '^reason=unexpected_volume_layout$'
+printf 'ubifs\n' >"$fixture/sys/class/ubi/ubi0/ubi0_6/name"
+set +e; out=$(run check); status=$?; set -e
+test "$status" = 2; echo "$out" | grep -q '^reason=ambiguous_volume$'
+rm -rf "$fixture/sys/class/ubi/ubi0/ubi0_6"
+mv "$fixture/sys/class/ubi/ubi0" "$fixture/sys/class/ubi/ubi0.missing"
+set +e; out=$(run check); status=$?; set -e
+test "$status" = 2; echo "$out" | grep -q '^reason=unexpected_ubi_device_count$'
 set +e; run expand >/dev/null 2>&1; status=$?; set -e
 test "$status" = 78
 echo storage-tests-ok
