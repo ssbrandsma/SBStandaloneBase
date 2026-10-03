@@ -7,7 +7,7 @@
 #define SB_MAX_SLIM_FRAME 65536
 #define SB_MAX_HTTP_HEADER 16384
 #define SB_MAX_HTTP_BODY 131072
-#define SBBASE_VERSION "0.2.1"
+#define SBBASE_VERSION "0.2.2"
 #define SB_LMS_COMPAT_VERSION "7.999.999"
 
 typedef struct {

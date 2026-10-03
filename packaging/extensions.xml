@@ -2,10 +2,10 @@
 <extensions>
   <details><title lang="EN">StandaloneBase</title></details>
   <applets>
-    <applet name="StandaloneBase" version="0.2.1" target="baby" minTarget="7.7.3" maxTarget="*">
+    <applet name="StandaloneBase" version="0.2.2" target="baby" minTarget="7.7.3" maxTarget="*">
       <title lang="EN">Standalone Base</title>
       <desc lang="EN">Local LMS-compatible infrastructure services for Squeezebox Radio.</desc>
-      <changes lang="EN">Fix installation on stock Radio firmware by including legacy-compatible ZIP directory entries.</changes>
+      <changes lang="EN">Use a flat package layout compatible with the stock Radio applet installer.</changes>
       <creator>Sjoerd Brandsma</creator>
     </applet>
   </applets>

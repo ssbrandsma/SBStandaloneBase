@@ -13,7 +13,7 @@ local ROOT = "/usr/share/jive/applets/StandaloneBase"
 local RUN = "/tmp/standalonebase"
 local SERVICES = {
     { name="Bootstrap service", exe="sbbase", args="--config /mnt/storage/standalonebase/config.json" },
-    { name="Webserver", exe="sbwebserver", args="--web-root "..ROOT.."/web --config-dir /mnt/storage/standalonebase" },
+    { name="Webserver", exe="sbwebserver", args="--web-root "..ROOT.." --config-dir /mnt/storage/standalonebase" },
     { name="HTTPS Proxy", exe="sbproxy", args="--listen 127.0.0.1:8765" },
 }
 local started = false
@@ -56,14 +56,14 @@ local function alive(s)
     local f=io.open(pidPath(s),"r"); if not f then return false end
     local pid=tonumber(f:read("*l")); f:close()
     if not pid then return false end
-    local exe=ROOT.."/bin/"..s.exe
+    local exe=ROOT.."/"..s.exe
     return os.execute("test -r /proc/"..tostring(pid).."/cmdline && grep -q '^"..exe.."' /proc/"..tostring(pid).."/cmdline 2>/dev/null") == 0
 end
 local function launch(s)
     if alive(s) then return true end
     os.remove(pidPath(s))
-    os.execute("chmod 755 "..ROOT.."/bin/"..s.exe.." >/dev/null 2>&1")
-    local cmd="( "..ROOT.."/bin/"..s.exe.." "..s.args.." >>"..RUN.."/"..s.exe..".log 2>&1 & pid=$!; "..
+    os.execute("chmod 755 "..ROOT.."/"..s.exe.." >/dev/null 2>&1")
+    local cmd="( "..ROOT.."/"..s.exe.." "..s.args.." >>"..RUN.."/"..s.exe..".log 2>&1 & pid=$!; "..
         "sleep 1; if kill -0 $pid >/dev/null 2>&1; then echo $pid >"..pidPath(s).."; else rm -f "..pidPath(s).."; fi )"
     os.execute(cmd)
     return alive(s)
@@ -100,7 +100,7 @@ function menu(self)
     local menu=SimpleMenu("menu")
     menu:addItem({text="LMS Server: 127.0.0.1"})
     for _,s in ipairs(SERVICES) do menu:addItem({text=s.name..": "..(alive(s) and "Running" or "Stopped")}) end
-    menu:addItem({text="Version: 0.2.1"})
+    menu:addItem({text="Version: 0.2.2"})
     window:addWidget(menu); window:show()
 end
 function free(self)
