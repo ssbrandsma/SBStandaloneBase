@@ -17,3 +17,5 @@ ctest --test-dir build --output-on-failure
 `scripts/build-arm.sh` automatically reuses the hardware-validated toolchain and static TLS prefix in `C:/Projects/SBHttpsProxy` when run under WSL. Override `SBHTTPSPROXY_ROOT`, `ARM_TOOLCHAIN_DIR`, or `ARM_TLS_PREFIX` for another location. `packaging/build-package.sh` stages the applet and creates the installer ZIP.
 
 See `docs/deployment.md`, `docs/recovery.md`, and `docs/testing.md` before device use.
+
+Read-only flash capacity reporting and the disabled expansion research milestone are documented in `docs/STORAGE.md`, `docs/STORAGE_TESTING.md`, and `docs/STORAGE_RECOVERY.md`.
