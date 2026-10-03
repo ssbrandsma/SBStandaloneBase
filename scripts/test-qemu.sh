@@ -11,6 +11,10 @@ done
 "$runner" -cpu arm926 "$root/build-arm/sbbase" --self-test
 "$runner" -cpu arm926 "$root/build-arm/sbbase" --version
 "$runner" -cpu arm926 "$root/build-arm/sb-storage-helper" info >/dev/null
+if test -f "$root/artifacts/ubi/ubifs-test-w4-r0.img"; then
+  "$runner" -cpu arm926 "$root/build-arm/sb-storage-helper" inspect-superblock \
+    "$root/artifacts/ubi/ubifs-test-w4-r0.img" | grep -q '^format=w4/r0$'
+fi
 set +e
 "$runner" -cpu arm926 "$root/build-arm/sb-storage-helper" expand >/dev/null 2>&1
 status=$?

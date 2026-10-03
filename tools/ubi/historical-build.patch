@@ -1,0 +1,24 @@
+diff --git a/ubi-utils/src/libubi.c b/ubi-utils/src/libubi.c
+index 3956e8d..cc1cf92 100644
+--- a/ubi-utils/src/libubi.c
++++ b/ubi-utils/src/libubi.c
+@@ -28,6 +28,7 @@
+ #include <limits.h>
+ #include <sys/ioctl.h>
+ #include <sys/stat.h>
++#include <sys/sysmacros.h>
+ #include <sys/types.h>
+ #include <libubi.h>
+ #include "libubi_int.h"
+diff --git a/mkfs.ubifs/mkfs.ubifs.h b/mkfs.ubifs/mkfs.ubifs.h
+index 56c3f48..b10e172 100644
+--- a/mkfs.ubifs/mkfs.ubifs.h
++++ b/mkfs.ubifs/mkfs.ubifs.h
+@@ -38,6 +38,7 @@
+ #include <getopt.h>
+ #include <sys/types.h>
+ #include <sys/stat.h>
++#include <sys/sysmacros.h>
+ #include <sys/ioctl.h>
+ #include <fcntl.h>
+ #include <dirent.h>

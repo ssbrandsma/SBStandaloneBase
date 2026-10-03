@@ -27,11 +27,18 @@ printf 'ubifs\n' >"$fixture/sys/class/ubi/ubi0/ubi0_2/name"
 printf '0\n' >"$fixture/sys/class/ubi/ubi0/ubi0_2/corrupted"
 printf '8178893\n' >"$fixture/sys/class/ubi/ubi0/test_fs_total_bytes"
 printf '5347738\n' >"$fixture/sys/class/ubi/ubi0/test_fs_free_bytes"
-run(){ SB_STORAGE_ROOT="$fixture" $runner "$helper" "$1"; }
+run(){ SB_STORAGE_ROOT="$fixture" $runner "$helper" "$@"; }
 out=$(run check)
 echo "$out" | grep -q '^compatible=true$'
 echo "$out" | grep -q '^target_lebs=521$'
 echo "$out" | grep -q '^flash_bytes=134217728$'
+printf '9.0.1 r17084\n' >"$fixture/etc/squeezeos.version"
+out=$(run check)
+echo "$out" | grep -q '^compatible=true$'
+printf '9.0.2 r99999\n' >"$fixture/etc/squeezeos.version"
+set +e; out=$(run check); status=$?; set -e
+test "$status" = 2; echo "$out" | grep -q '^reason=unsupported_firmware$'
+printf '7.7.3 r16676\n' >"$fixture/etc/squeezeos.version"
 printf '1\n' >"$fixture/sys/class/ubi/ubi0/ubi0_2/corrupted"
 set +e; out=$(run check); status=$?; set -e
 test "$status" = 2; echo "$out" | grep -q '^reason=volume_corrupted_or_unknown$'
@@ -60,5 +67,9 @@ mv "$fixture/sys/class/ubi/ubi0" "$fixture/sys/class/ubi/ubi0.missing"
 set +e; out=$(run check); status=$?; set -e
 test "$status" = 2; echo "$out" | grep -q '^reason=unexpected_ubi_device_count$'
 set +e; run expand >/dev/null 2>&1; status=$?; set -e
+test "$status" = 78
+set +e; run resize-test-volume 8388608 WRONG_TOKEN >/dev/null 2>&1; status=$?; set -e
+test "$status" = 77
+set +e; run resize-test-volume 8388608 I_ACCEPT_TEST_VOLUME_FLASH_WRITE >/dev/null 2>&1; status=$?; set -e
 test "$status" = 78
 echo storage-tests-ok

@@ -46,6 +46,13 @@ sha256sum ubifs-test.img
 
 The `-c 521` maximum is essential to testing later growth. Confirm the tool does not enable authentication, encryption, or newer incompatible format features. Record `mkfs.ubifs --version` and inspect the image with a compatible `ubireader`/dump tool before transfer.
 
+The repository already provides the reviewed equivalents:
+
+```sh
+sha256sum -c artifacts/ubi/SHA256SUMS
+build-arm/sb-storage-helper inspect-superblock artifacts/ubi/ubifs-test-w4-r0.img
+```
+
 ## 4. Separately approved flash phases
 
 After repeating section 2, transfer the image and, only with explicit approval, write it to the named test volume:
@@ -70,6 +77,27 @@ sha256sum -c /mnt/ubifs-test/sentinel.sha256
 ```
 
 Record kernel messages, sysfs sizes, `df`, mount behavior, and whether growth occurs on first mount, remount, or reboot. Perform a clean reboot-persistence check only after the checksum passes. Deletion of the test volume is a later, separately approved action.
+
+After `.222` is online, the exact proposed execution is:
+
+```sh
+# Workstation: copy the read-only-capable helper to tmpfs, then discover first.
+scp -O artifacts/ubi/sb-storage-helper-armv5-static root@192.168.1.222:/tmp/
+ssh root@192.168.1.222 'chmod 755 /tmp/sb-storage-helper-armv5-static; /tmp/sb-storage-helper-armv5-static info'
+ssh root@192.168.1.222 \
+  'for n in /sys/class/ubi/ubi0/ubi0_*/name; do [ "$(cat "$n")" = ubifs_test ] && echo "${n%/name}"; done'
+
+# Transfer the image and procedure only after the read-only results are reviewed.
+scp -O artifacts/ubi/ubifs-test-w4-r0.img tools/ubi/run-isolated-growth-test.sh \
+    root@192.168.1.222:/tmp/
+
+# This final command is intentionally NOT approved or executed in this milestone.
+ssh root@192.168.1.222 \
+  'SB_ALLOW_UBI_MUTATION=isolated-test-only /bin/sh /tmp/run-isolated-growth-test.sh \
+   /tmp/ubifs-test-w4-r0.img /tmp/sb-storage-helper-armv5-static 8388608'
+```
+
+The script rediscovers `ubifs_test`, requires a dynamic, unmounted, uncorrupted volume, rejects IDs 0–4, writes only that volume, records a checksum, grows it through the guarded helper, verifies the checksum, reports capacity and inspects the resulting superblock. Review the script and authorize this final command separately.
 
 ## Failure stops
 
