@@ -1,0 +1,27 @@
+StandaloneBase historical UBIFS artifacts
+=========================================
+
+mtd-utils repository: https://git.kernel.org/pub/scm/linux/kernel/git/rw/mtd-utils.git
+mtd-utils commit: bb56df1e1a84304ec4a14169e4cdc41116ed4256
+commit date: 2009-06-05
+mkfs.ubifs version: 1.3
+compatibility patch: tools/ubi/historical-build.patch
+canonical build: powershell -File tools/ubi/build.ps1
+validated fallback: WSL Ubuntu 24.04 using tools/ubi/build-wsl.sh
+
+Test image command:
+  tools/ubi/make-test-image.sh artifacts/ubi/mkfs.ubifs-20090605-x86_64 artifacts/ubi/ubifs-test-w4-r0.img
+
+Test image profile:
+  min_io_size=2048
+  leb_size=129024
+  max_leb_cnt=521
+  compressor=lzo
+  format=w4/r0
+
+The build source and commands are pinned. Fresh filesystem images need not have
+the checked-in image's SHA-256 because historical mkfs.ubifs includes variable
+metadata. Inspect and compare decoded geometry and format for rebuilt images.
+
+The checked-in hashes are recorded in SHA256SUMS.
+The helper artifact is ARM EABI5, soft-float, statically linked, and stripped.
