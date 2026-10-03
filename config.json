@@ -1,0 +1,40 @@
+{
+  "server": {
+    "name": "Standalone Base",
+    "uuid": "9d989f40-499a-4b85-b92f-8dc415af2a04",
+    "host": "0.0.0.0",
+    "advertise_ip": "127.0.0.1",
+    "http_port": 9000,
+    "slimproto_port": 3483,
+    "discovery_port": 3483,
+    "version": "7.999.999"
+  },
+  "applets": [
+    {
+      "name": "StandaloneRadio",
+      "title": "Standalone Radio",
+      "version": "0.9.1",
+      "target": "baby",
+      "min_target_version": "7.7",
+      "url": "http://49.12.198.91/sbstandalone/StandaloneRadio-0.9.1.zip",
+      "sha": "57f55dee91695b9eb8a19955b87aa806c75753a3",
+      "desc": "Standalone internet radio playback for Logitech Squeezebox Radio.",
+      "changes": "Fix HTTPS Proxy health detection on stock SqueezePlay.",
+      "creator": "Sjoerd Brandsma",
+      "email": ""
+    },
+    {
+      "name": "SpotifyConnect",
+      "title": "Standalone Spotify",
+      "version": "0.5.4",
+      "target": "baby",
+      "min_target_version": "7.7",
+      "url": "http://49.12.198.91/sbspotifyconnect/SpotifyConnect-0.5.4.zip",
+      "sha": "7ba64e938f67c982e8970a9b04a06615b2a2a5a8",
+      "desc": "Standalone Spotify Connect playback for Logitech Squeezebox Radio.",
+      "changes": "Fix playback across natural track boundaries and rapid Spotify track changes.",
+      "creator": "Sjoerd Brandsma",
+      "email": ""
+    }
+  ]
+}
