@@ -4,8 +4,8 @@ boot=$1
 fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT
 mkdir -p "$fixture/sys/class/ubi/ubi0/ubi0_5" "$fixture/dev" "$fixture/proc" \
- "$fixture/mnt/sbdata/applets/SetupApplet" "$fixture/mnt/sbdata/applets/StandaloneBase" \
- "$fixture/usr/share/jive/applets/SetupApplet" "$fixture/usr/share/jive/applets/StandaloneBase" "$fixture/bin"
+ "$fixture/mnt/sbdata/applets/SetupAppletInstaller" "$fixture/mnt/sbdata/applets/StandaloneBase" \
+ "$fixture/usr/share/jive/applets/SetupAppletInstaller" "$fixture/usr/share/jive/applets/StandaloneBase" "$fixture/bin"
 printf 'sbdata\n' >"$fixture/sys/class/ubi/ubi0/ubi0_5/name"
 printf 'dynamic\n' >"$fixture/sys/class/ubi/ubi0/ubi0_5/type"
 printf '0\n' >"$fixture/sys/class/ubi/ubi0/ubi0_5/corrupted"

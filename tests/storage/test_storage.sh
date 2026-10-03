@@ -5,7 +5,7 @@ runner=${2:-}
 fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT
 mkdir -p "$fixture/proc/sys/kernel" "$fixture/sys/class/ubi/ubi0" "$fixture/etc/init.d" \
- "$fixture/dev" "$fixture/usr/sbin" "$fixture/usr/share/jive/applets/SetupApplet" \
+ "$fixture/dev" "$fixture/usr/sbin" "$fixture/usr/share/jive/applets/SetupAppletInstaller" \
  "$fixture/usr/share/jive/applets/StandaloneBase" "$fixture/mnt/storage/standalonebase" "$fixture/tmp"
 for spec in '0 kernel_bak' '1 cramfs_bak' '2 ubifs' '3 kernel' '4 cramfs'; do
  set -- $spec; d="$fixture/sys/class/ubi/ubi0/ubi0_$1"; mkdir "$d"
@@ -68,9 +68,9 @@ touch "$fixture/dev/ubi0"
 printf '# existing user hook\n' >"$fixture/etc/init.d/rcS.local"
 set +e; out=$(run prepare); s=$?; set -e; test "$s" = 2; reason "$out" existing_rcs_local_requires_review
 printf '# STANDALONEBASE-SBDATA\n' >"$fixture/etc/init.d/rcS.local"
-rm -rf "$fixture/usr/share/jive/applets/SetupApplet"
+rm -rf "$fixture/usr/share/jive/applets/SetupAppletInstaller"
 set +e; out=$(run prepare); s=$?; set -e; test "$s" = 2; reason "$out" required_applets_missing
-mkdir "$fixture/usr/share/jive/applets/SetupApplet"
+mkdir "$fixture/usr/share/jive/applets/SetupAppletInstaller"
 
 # Correct sbdata, incomplete install, and then complete verified state.
 d="$fixture/sys/class/ubi/ubi0/ubi0_5"; mkdir "$d"; printf 'sbdata\n' >"$d/name"; printf 'dynamic\n' >"$d/type"; printf '0\n' >"$d/corrupted"; printf '521\n' >"$d/reserved_ebs"; printf '129024\n' >"$d/usable_eb_size"; touch "$fixture/dev/ubi0_5"
@@ -81,7 +81,7 @@ set +e; out=$(run prepare); s=$?; set -e; test "$s" = 2; reason "$out" missing_s
 touch "$fixture/dev/ubi0_5"
 out=$(run storage-status); echo "$out" | grep -q '^installation_state=partial$'
 set +e; out=$(run verify); s=$?; set -e; test "$s" = 3; echo "$out" | grep -q '^verify_reason=sbdata_not_mounted$'
-mkdir -p "$fixture/mnt/sbdata/applets/SetupApplet" "$fixture/mnt/sbdata/applets/StandaloneBase"
+mkdir -p "$fixture/mnt/sbdata/applets/SetupAppletInstaller" "$fixture/mnt/sbdata/applets/StandaloneBase"
 printf 'ubi0:sbdata /mnt/sbdata ubifs rw 0 0\n/mnt/sbdata/applets /usr/share/jive/applets none rw,bind 0 0\n' >>"$fixture/proc/mounts"
 set +e; out=$(run verify); s=$?; set -e; test "$s" = 3; echo "$out" | grep -q '^verify_reason=boot_integration_incomplete$'
 touch "$fixture/mnt/storage/standalonebase/sbdata-boot.sh"

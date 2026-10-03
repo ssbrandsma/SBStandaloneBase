@@ -27,10 +27,10 @@ mkdir -p "$MOUNT"
 grep -q "^[^ ]* $MOUNT ubifs " "$MOUNTS" || mount -t ubifs ubi0:sbdata "$MOUNT" || fail "mount failed"
 test -d "$SOURCE" || fail "sbdata applet directory is missing"
 test -d "$SOURCE/StandaloneBase" || fail "StandaloneBase is missing from sbdata"
-test -d "$SOURCE/SetupApplet" -o -d "$SOURCE/AppletInstaller" || fail "standard applets are missing from sbdata"
+test -d "$SOURCE/SetupAppletInstaller" || fail "standard applets are missing from sbdata"
 test -d "$TARGET" || fail "active applet directory is missing"
 grep -q "^[^ ]* $TARGET " "$MOUNTS" || mount -o bind "$SOURCE" "$TARGET" || fail "bind mount failed"
-if test ! -d "$TARGET/StandaloneBase" || { test ! -d "$TARGET/SetupApplet" && test ! -d "$TARGET/AppletInstaller"; }; then
+if test ! -d "$TARGET/StandaloneBase" || test ! -d "$TARGET/SetupAppletInstaller"; then
  umount "$TARGET" 2>/dev/null || true
  fail "post-bind visibility check failed"
 fi
