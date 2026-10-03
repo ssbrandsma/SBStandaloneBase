@@ -10,7 +10,7 @@ canonical build: powershell -File tools/ubi/build.ps1
 validated fallback: WSL Ubuntu 24.04 using tools/ubi/build-wsl.sh
 
 Test image command:
-  tools/ubi/make-test-image.sh artifacts/ubi/mkfs.ubifs-20090605-x86_64 artifacts/ubi/ubifs-test-w4-r0.img
+  tools/ubi/make-test-image.sh artifacts/ubi/mkfs.ubifs-20090605-x86_64 artifacts/ubi/sbdata-w4-r0.img
 
 Test image profile:
   min_io_size=2048
@@ -23,5 +23,7 @@ The build source and commands are pinned. Fresh filesystem images need not have
 the checked-in image's SHA-256 because historical mkfs.ubifs includes variable
 metadata. Inspect and compare decoded geometry and format for rebuilt images.
 
-The checked-in hashes are recorded in SHA256SUMS.
+The checked-in hashes are recorded in SHA256SUMS. The image is an offline
+candidate for the proposed sbdata profile; it is not approved for device use.
 The helper artifact is ARM EABI5, soft-float, statically linked, and stripped.
+It contains no UBI resize ioctl and its install command is hard-disabled.

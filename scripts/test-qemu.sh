@@ -15,9 +15,11 @@ echo "$catalog" | grep -q '"count":2'
 echo "$catalog" | grep -q '"title": "Standalone Radio"'
 echo "$catalog" | grep -q '"title": "Standalone Spotify"'
 "$runner" -cpu arm926 "$root/build-arm/sb-storage-helper" info >/dev/null
-if test -f "$root/artifacts/ubi/ubifs-test-w4-r0.img"; then
+"$root/tests/storage/test_storage.sh" "$root/build-arm/sb-storage-helper" "$runner -cpu arm926"
+"$root/tests/storage/test_boothelper.sh" "$root/scripts/sbdata-boot.sh"
+if test -f "$root/artifacts/ubi/sbdata-w4-r0.img"; then
   "$runner" -cpu arm926 "$root/build-arm/sb-storage-helper" inspect-superblock \
-    "$root/artifacts/ubi/ubifs-test-w4-r0.img" | grep -q '^format=w4/r0$'
+    "$root/artifacts/ubi/sbdata-w4-r0.img" | grep -q '^format=w4/r0$'
 fi
 set +e
 "$runner" -cpu arm926 "$root/build-arm/sb-storage-helper" expand >/dev/null 2>&1

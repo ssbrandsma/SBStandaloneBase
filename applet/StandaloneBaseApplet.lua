@@ -130,6 +130,7 @@ end
 local function mib(v) return string.format("%.1f MiB",(tonumber(v) or 0)/1048576) end
 function storageMenu(self)
     local i=storage:getStorageInfo()
+    local s=storage:getStorageStatus()
     local window=Window("text_list","Storage")
     local menu=SimpleMenu("menu")
     menu:addItem({text="Used: "..mib((i.filesystem_total_bytes or 0)-(i.filesystem_free_bytes or 0))})
@@ -137,11 +138,15 @@ function storageMenu(self)
     menu:addItem({text="Total: "..mib(i.filesystem_total_bytes)})
     menu:addItem({text="Flash expansion: "..(i.compatible=="true" and "Supported (disabled)" or "Unavailable")})
     menu:addItem({text="Target: "..mib(i.target_bytes)})
-    menu:addItem({text="Expansion requires validation and backup"})
+    menu:addItem({text="sbdata: "..(s.installation_state or "unknown")})
+    menu:addItem({text="Storage installation disabled"})
     window:addWidget(menu); window:show()
 end
 function getStandaloneStorageInfo(self) return storage:getStorageInfo() end
 function getStandaloneStorageCompatibility(self) return storage:getCompatibility() end
+function getStandaloneStorageStatus(self) return storage:getStorageStatus() end
+function getStandaloneStoragePreparation(self) return storage:getStoragePreparation() end
+function verifyStandaloneStorage(self) return storage:verifyStorage() end
 function free(self)
     if self.monitor then self.monitor:stop() end
     for _,t in pairs(self.backoff or {}) do t:stop() end
