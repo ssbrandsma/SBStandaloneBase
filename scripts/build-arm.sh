@@ -39,10 +39,13 @@ mkdir -p "$out"
   -D_GNU_SOURCE -I"$tls_prefix/include" "$root/native/sbproxy/sbproxy.c" \
   "$tls_prefix/lib/libcurl.a" "$tls_prefix/lib/libwolfssl.a" -o "$out/sbproxy"
 
-"$strip" --strip-all "$out/sbbase" "$out/sbwebserver" "$out/sbproxy"
-file "$out/sbbase" "$out/sbwebserver" "$out/sbproxy"
-"$size" "$out/sbbase" "$out/sbwebserver" "$out/sbproxy"
-for binary in sbbase sbwebserver sbproxy; do
+"$cc" -static $flags -std=c99 -Wall -Wextra -Wpedantic -Wl,--gc-sections \
+  "$root/native/sbstorage/sb_storage_helper.c" -o "$out/sb-storage-helper"
+
+"$strip" --strip-all "$out/sbbase" "$out/sbwebserver" "$out/sbproxy" "$out/sb-storage-helper"
+file "$out/sbbase" "$out/sbwebserver" "$out/sbproxy" "$out/sb-storage-helper"
+"$size" "$out/sbbase" "$out/sbwebserver" "$out/sbproxy" "$out/sb-storage-helper"
+for binary in sbbase sbwebserver sbproxy sb-storage-helper; do
   if readelf -l "$out/$binary" | grep -q INTERP; then echo "$binary unexpectedly has an ELF interpreter" >&2; exit 1; fi
   if readelf -d "$out/$binary" 2>/dev/null | grep -q NEEDED; then echo "$binary unexpectedly has shared dependencies" >&2; exit 1; fi
 done
