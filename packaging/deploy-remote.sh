@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-version=0.2.2
-expected_sha=183d54697d8388a13e6c9db5c4e29714b75fbf6d
+version=0.2.3
+expected_sha=9830e094c07d0f26b2697ca434e1371b818f4c5c
 stamp=$(date +%Y%m%d-%H%M%S)
 base_root=/var/www/bytestack_nl_usr/data/www/bytestack.nl/sbstandalonebase
 merged_xml=/var/www/bytestack_nl_usr/data/www/bytestack.nl/squeezebox/extensions.xml
