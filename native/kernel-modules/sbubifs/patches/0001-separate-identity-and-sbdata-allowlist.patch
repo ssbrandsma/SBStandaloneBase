@@ -1,0 +1,95 @@
+--- a/ubifs.h
++++ b/ubifs.h
+@@ -93,7 +93,7 @@
+  * Background thread name pattern. The numbers are UBI device and volume
+  * numbers.
+  */
+-#define BGT_NAME_PATTERN "ubifs_bgt%d_%d"
++#define BGT_NAME_PATTERN "sbubifs_bgt%d_%d"
+ 
+ /* Default write-buffer synchronization timeout in seconds */
+ #define DEFAULT_WBUF_TIMEOUT_SECS 5
+--- a/super.c
++++ b/super.c
+@@ -55,0 +56,20 @@
++
++/*
++ * SBUBIFS is intentionally restricted to the one dedicated expansion
++ * volume. Validate resolved UBI identity, not the caller-provided mount text.
++ * Keeping both the name and numeric identity fail-closed prevents this clone
++ * from ever opening the production ubi0:ubifs volume read-write.
++ */
++static int sbubifs_volume_allowed(const struct ubi_volume_info *vi)
++{
++	static const char allowed_name[] = "sbdata";
++
++	if (vi->ubi_num != 0 || vi->vol_id != 5 ||
++	    vi->name_len != sizeof(allowed_name) - 1 ||
++	    memcmp(vi->name, allowed_name, sizeof(allowed_name) - 1) != 0)
++		return 0;
++	if (vi->vol_type != UBI_DYNAMIC_VOLUME || vi->corrupted ||
++	    vi->upd_marker)
++		return 0;
++	return 1;
++}
+@@ -1948,6 +1968,12 @@ static int ubifs_fill_super(struct super_block *sb, void *data, int silent)
+ 	ubi_get_volume_info(ubi, &c->vi);
+ 	ubi_get_device_info(c->vi.ubi_num, &c->di);
+ 
++	/* Re-check immediately before the read-write open. */
++	if (!sbubifs_volume_allowed(&c->vi)) {
++		err = -EACCES;
++		goto out_free;
++	}
++
+ 	/* Re-open the UBI device in read-write mode */
+ 	c->ubi = ubi_open_volume(c->vi.ubi_num, c->vi.vol_id, UBI_READWRITE);
+ 	if (IS_ERR(c->ubi)) {
+@@ -1964,7 +1990,8 @@ static int ubifs_fill_super(struct super_block *sb, void *data, int silent)
+ 	err  = bdi_init(&c->bdi);
+ 	if (err)
+ 		goto out_close;
+-	err = bdi_register(&c->bdi, NULL, "ubifs");
++	err = bdi_register(&c->bdi, NULL, "sbubifs_%d_%d",
++			   c->vi.ubi_num, c->vi.vol_id);
+ 	if (err)
+ 		goto out_bdi;
+ 
+@@ -2045,6 +2072,13 @@ static int ubifs_get_sb(struct file_system_type *fs_type, int flags,
+ 	}
+ 	ubi_get_volume_info(ubi, &vi);
+ 
++	if (!sbubifs_volume_allowed(&vi)) {
++		ubifs_err("refusing non-sbdata UBI volume ubi%d_%d", vi.ubi_num,
++			  vi.vol_id);
++		err = -EACCES;
++		goto out_close;
++	}
++
+ 	dbg_gen("opened ubi%d_%d", vi.ubi_num, vi.vol_id);
+ 
+ 	sb = sget(fs_type, &sb_test, &set_anon_super, &vi.cdev);
+@@ -2091,7 +2124,7 @@ out_close:
+ }
+ 
+ static struct file_system_type ubifs_fs_type = {
+-	.name    = "ubifs",
++	.name    = "sbubifs",
+ 	.owner   = THIS_MODULE,
+ 	.get_sb  = ubifs_get_sb,
+ 	.kill_sb = kill_anon_super,
+@@ -2175,7 +2208,7 @@ static int __init ubifs_init(void)
+ 	}
+ 
+ 	err = -ENOMEM;
+-	ubifs_inode_slab = kmem_cache_create("ubifs_inode_slab",
++	ubifs_inode_slab = kmem_cache_create("sbubifs_inode_slab",
+ 				sizeof(struct ubifs_inode), 0,
+ 				SLAB_MEM_SPREAD | SLAB_RECLAIM_ACCOUNT,
+ 				&inode_slab_ctor);
+@@ -2222,4 +2255,4 @@ module_exit(ubifs_exit);
+ MODULE_LICENSE("GPL");
+ MODULE_VERSION(__stringify(UBIFS_VERSION));
+ MODULE_AUTHOR("Artem Bityutskiy, Adrian Hunter");
+-MODULE_DESCRIPTION("UBIFS - UBI File System");
++MODULE_DESCRIPTION("SBUBIFS - isolated second Logitech UBIFS instance");
