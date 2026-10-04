@@ -4,7 +4,7 @@ Date: 2026-10-04
 
 Target: Logitech Squeezebox Radio, MAC `00:04:20:29:16:7f`
 
-Requested address: `192.168.1.222`
+Address: `192.168.1.222`
 
 Firmware: SqueezeOS 7.7.3 r16676
 
@@ -12,125 +12,174 @@ Kernel: `2.6.26.8-rt16 #1 PREEMPT RT`, ARMv5TEJ
 
 ## Verdict
 
-**BLOCKED before Stage 1.** Stage 0 device, storage, module, and serial checks
-passed, but the workstation could not reach TCP port 22 on the Radio. A
-fallback upload to RAM over the serial console encountered a truncated command
-and was stopped. The incomplete zero-byte `/tmp/sbubifs.ko.part` was removed.
-The module was never loaded, `sbdata` was never mounted, and NAND-backed data
-was not changed.
+**CONDITIONAL.** The module loaded and unloaded cleanly and mounted `sbdata`
+read-only alongside production UBIFS. Both drivers had distinct filesystem,
+BDI and slab identities, and no kernel warning or storage error occurred.
 
-This is not evidence for or against SBUBIFS runtime compatibility.
+The run stopped before the read/write stage because the SSH transport closed
+unexpectedly while opening the Stage 3 command channel. A read-only state
+check proved that command never began. In accordance with the required stop
+policy, it was not retried. No write was made to `sbdata`.
 
 ## Module identity
 
-The initially inspected file `/tmp/sbubifs-out/sbubifs.ko` had the expected
-198,944-byte size but SHA-256 `cf3941d5...009a18`; it was rejected and never
-sent to the Radio. The authorized artifact was then found at
-`/tmp/sbubifs-work/src/sbubifs.ko` and verified as:
+The authorized artifact was `/tmp/sbubifs-work/src/sbubifs.ko`:
 
 ```text
-size:    198944 bytes
-sha256:  63652ce67df06a78abb84a4986253bdab02fbd7b7c000779c60b3d393ba9566b
-format:  ELF 32-bit LSB relocatable, ARM, EABI5, not stripped
+sha256: 63652ce67df06a78abb84a4986253bdab02fbd7b7c000779c60b3d393ba9566b
+size:   199119 bytes
+format: ELF 32-bit LSB relocatable, ARM, EABI5, not stripped
 ```
+
+An older output at `/tmp/sbubifs-out/sbubifs.ko` was 198,944 bytes but had a
+different SHA-256 and was rejected. The Radio lacks `sha256sum`, so the
+uploaded RAM file was read back byte-for-byte over host-key-verified SSH and
+hashed locally. Its size and digest exactly matched the authorized artifact.
 
 ## Stage 0 — PASS
 
-COM5 at 115200 8N1 returned an independently delimited command result after
-the serial helper was changed to wait for the newly opened shell. It remained
-usable after cleanup.
+SSH used the existing known-host key with `RejectPolicy`. COM5 at 115200 8N1
+was independently monitored and captured the SBUBIFS mount messages.
 
-Observed baseline:
+Baseline:
 
 ```text
 /dev/root       /             cramfs  ro
 ubi0:ubifs      /mnt/storage  ubifs   rw,noatime
-sbdata          not mounted
+sbdata          unmounted
 /proc/sys/kernel/tainted: 0
 MemTotal: 62112 kB
-MemFree:  13656 kB
-/mnt/storage available: 4980 KiB
+MemFree:  10424 kB
+/mnt/storage available: 4984 KiB
 ```
 
-Verified UBI identity by name as well as number:
+UBI identity was resolved by sysfs path and exact volume name:
 
 | Volume | ID | Type | Reserved LEBs | LEB size | Corrupt | Update marker |
 |---|---:|---|---:|---:|---:|---:|
 | `ubifs` | 2 | dynamic | 82 | 129024 | 0 | 0 |
 | `sbdata` | 5 | dynamic | 521 | 129024 | 0 | 0 |
 
-The boot log showed production UBIFS recovery followed by a successful clean
-mount and media format `w4/r0`. It contained no UBI/UBIFS corruption or I/O
-error. The only later warning-like message was an unrelated SSI FIFO error.
-Production storage was readable and remained mounted.
+No baseline UBI/UBIFS corruption or I/O error was present. Production UBIFS
+had completed its ordinary boot-time recovery and mounted as `w4/r0`.
 
-The Radio reported `192.168.1.222` on `eth1`, but workstation TCP/22 attempts
-timed out and ICMP was unreachable. The Radio also could not ping the
-workstation at `192.168.1.190`, consistent with client isolation.
+## Stage 1 — PASS
 
-## Transfer attempt and stop
-
-Only the permitted RAM path `/tmp/sbubifs.ko.part` was targeted. The serial
-fallback encoded binary bytes as shell `printf` input with acknowledged
-chunks. The first command exceeded the console's reliable line handling and
-left the shell at a continuation prompt. Following the required stop policy,
-no retry or alternate transfer was attempted.
-
-The prompt was restored by closing the incomplete quote. Cleanup verification:
+`insmod /tmp/sbubifs.ko` returned zero in approximately one second. While
+loaded:
 
 ```text
-/tmp/sbubifs.ko.part: 0 bytes before removal
-/tmp/sbubifs.ko:      absent
-/proc/modules:        ar6000 only
-sbdata mount:         absent
-kernel taint:         0
+/proc/filesystems: ubifs and sbubifs
+/proc/modules:     sbubifs 167600 0 - Live 0xbf024000
+slabs:             ubifs_inode_slab and sbubifs_inode_slab
+kernel taint:      0
 ```
 
-## Stage results
+Production `/mnt/storage` remained mounted and readable. No load-time kernel
+message, BDI conflict, slab conflict, warning, or error occurred. `MemFree`
+changed from 8,524 kB immediately before loading to 7,936 kB after loading,
+an observed delta of about 588 kB which includes concurrent cache variation.
 
-| Stage | Result | Notes |
-|---|---|---|
-| 0 — preflight/baseline | **PASS** | Identity, UBI metadata, health, memory, module hash, logs, and COM5 verified |
-| 1 — module load/unload | **BLOCKED / NOT TESTED** | Exact module could not be transferred reliably |
-| 2 — read-only mount | **NOT TESTED** | Stage 1 prerequisite not met |
-| 3 — read/write operations | **NOT TESTED** | No filesystem write occurred |
-| 4 — persistence/remount | **NOT TESTED** | No mount occurred |
-| 5 — memory/performance | **NOT TESTED** | Baseline memory only |
-| 6 — cleanup | **PASS for attempted state** | Incomplete RAM file removed; module absent; `sbdata` unmounted; production UBIFS operational |
+`rmmod sbubifs` returned zero. `sbubifs` disappeared from `/proc/filesystems`,
+`/proc/modules`, and `/proc/slabinfo`; built-in `ubifs` remained registered and
+production storage remained readable. `MemFree` recovered to 8,436 kB and
+taint remained zero.
 
-## Commands and actions used
+## Stage 2 — PASS
 
-Read-only Radio commands included `uname -a`, `/proc/filesystems`,
-`/proc/mounts`, `/proc/meminfo`, `/proc/modules`, `/proc/mtd`, `df -k`, UBI
-attributes below `/sys/class/ubi`, `ifconfig`, `route`, and `dmesg`. Cleanup
-removed only `/tmp/sbubifs.ko` and `/tmp/sbubifs.ko.part`.
+The module was reloaded and the existing filesystem was mounted with:
 
-No volume was opened or mounted through SBUBIFS. No command addressed
-`/dev/mtd*`, `/dev/ubi*`, `/mnt/storage`, volume creation/removal/resize,
-formatting, boot configuration, or the second Radio. No reboot occurred.
+```sh
+mount -t sbubifs -o ro ubi0:sbdata /tmp/sbubifs-test
+```
 
-## Answers required by the milestone
+Observed:
 
-1. Module load: **NOT TESTED**.
-2. Module unload: **NOT TESTED**.
-3. Simultaneous filesystem registration: **NOT TESTED**.
-4. `sbdata` mount alongside production: **NOT TESTED**.
-5. BDI or slab conflicts: **NOT TESTED**.
-6. Read/write operations: **NOT TESTED**.
-7. Persistence: **NOT TESTED**.
-8. Additional memory: **NOT MEASURED**; baseline `MemFree` was 13,656 kB.
-9. Kernel warnings/errors: no storage warning or error in the baseline; one
-   unrelated SSI FIFO message was present.
-10. Production UBIFS operational: **YES** throughout the attempted work.
-11. Temporary Radio state cleaned: **YES**.
-12. Suitable for the next milestone: **NOT YET ESTABLISHED**.
+```text
+ubi0:sbdata /tmp/sbubifs-test sbubifs ro
+filesystem size: 65802240 bytes (510 LEBs)
+journal size:    8902656 bytes (69 LEBs)
+media format:    w4/r0
+available:       59708 KiB
+contents:        empty root directory
+BDIs:            ubifs and sbubifs_0_5
+```
 
-## Required next step
+Both inode slabs existed independently. Production UBIFS remained mounted and
+readable. There was no recovery message, write attempt, warning, error, taint,
+or unexpected UBI metadata change. `MemFree` while mounted was 7,484 kB.
 
-Restore direct workstation-to-Radio connectivity (or provide a separately
-validated binary-safe transfer route), then restart at Stage 0. Verify the
-Radio-side SHA-256 before `insmod`. Do not resume at Stage 1 based on this run's
-baseline because device state may have changed.
+The production-volume rejection was established by static inspection of the
+module allowlist rather than opening volume ID 2 through SBUBIFS. The allowlist
+requires UBI0, ID5, exact name `sbdata`, dynamic type, and clear corruption and
+update markers.
 
-**Final verdict: CONDITIONAL — validation is blocked by transport; runtime was
-not tested.**
+The filesystem was cleanly unmounted and the module was cleanly unloaded.
+`MemFree` was then 8,176 kB. The temporary mountpoint was removed.
+
+## Stage 3 — BLOCKED / NOT TESTED
+
+Before Stage 3, the following prerequisites were confirmed:
+
+- `sbdata` remained UBI0/ID5, named `sbdata`, 521 LEBs, healthy;
+- the read-only root contained no user data;
+- checked-in `artifacts/ubi/sbdata-w4-r0.img` and the pinned historical builder
+  can recreate the 2048/129024/521 `w4/r0` profile;
+- the module source still contained the exact `sbdata` allowlist;
+- Stage 2 produced no unexpected kernel message.
+
+The SSH transport raised `EOFError` while opening the Stage 3 command channel.
+A subsequent read-only inspection showed only `ar6000` loaded, no `sbdata`
+mount, no test directory, taint zero, and no new kernel message. Therefore the
+read/write command did not start. It was deliberately not retried.
+
+No file, metadata, payload, checksum, or sync test was physically executed.
+
+## Stages 4 and 5 — NOT TESTED
+
+Persistence/remount and read/write performance were not tested because Stage
+3 did not run. Stage 1 and 2 timing resolution was one second: module load was
+at most approximately one second, while mount and unload completed within the
+same one-second uptime tick.
+
+## Stage 6 — PASS for executed state
+
+Cleanup verification:
+
+```text
+/tmp/sbubifs.ko:   removed
+/tmp/sbubifs-test: removed
+sbubifs module:    absent
+sbdata mount:      absent
+production UBIFS:  mounted read-write and readable
+original ubifs:    registered
+kernel taint:      0
+```
+
+No startup configuration was changed. No volume was formatted, recreated,
+resized, created, or removed. No direct MTD/UBI write or production-file change
+occurred. No reboot occurred and the second Radio was not contacted.
+
+## Required answers
+
+1. Did `sbubifs.ko` load successfully? **Yes.**
+2. Did it unload successfully? **Yes.**
+3. Were both filesystem types registered simultaneously? **Yes.**
+4. Could `sbdata` mount alongside production UBIFS? **Yes, read-only.**
+5. Were there BDI or slab conflicts? **No.**
+6. Did read/write operations succeed? **NOT TESTED.**
+7. Did data survive unmount/remount? **NOT TESTED.**
+8. Additional memory? **About 588 kB loaded; mounted observation was about
+   1,040 kB below the immediate pre-load sample. Most memory returned.**
+9. Kernel warnings or errors? **None attributable to SBUBIFS or storage.**
+10. Did production UBIFS remain operational? **Yes.**
+11. Was temporary test state cleaned? **Yes.**
+12. Suitable for the next milestone? **Not yet; read/write and persistence
+    validation remain required.**
+
+The next approved run must restart at Stage 0 and may proceed to Stage 3 only
+after repeating the prerequisites. It must not infer current state from this
+run.
+
+**Final verdict: CONDITIONAL — load/unload and read-only coexistence passed;
+read/write and persistence remain untested.**
