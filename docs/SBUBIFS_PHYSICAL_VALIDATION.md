@@ -12,14 +12,15 @@ Kernel: `2.6.26.8-rt16 #1 PREEMPT RT`, ARMv5TEJ
 
 ## Verdict
 
-**CONDITIONAL.** The module loaded and unloaded cleanly and mounted `sbdata`
-read-only alongside production UBIFS. Both drivers had distinct filesystem,
-BDI and slab identities, and no kernel warning or storage error occurred.
+**CONDITIONAL.** The module loaded and unloaded cleanly, mounted `sbdata`
+alongside production UBIFS both read-only and read-write, and completed bounded
+small-file and metadata operations. Both drivers had distinct filesystem, BDI
+and slab identities, and no kernel warning or storage error occurred.
 
-The run stopped before the read/write stage because the SSH transport closed
-unexpectedly while opening the Stage 3 command channel. A read-only state
-check proved that command never began. In accordance with the required stop
-policy, it was not retried. No write was made to `sbdata`.
+Stage 3 stopped after the Radio reported that its BusyBox installation has no
+`readlink` utility. The symlink was subsequently verified non-destructively
+with `ls -l`, but the stop policy prevented continuing to the 1 MiB payload.
+Persistence and throughput therefore remain untested.
 
 ## Module identity
 
@@ -117,7 +118,7 @@ update markers.
 The filesystem was cleanly unmounted and the module was cleanly unloaded.
 `MemFree` was then 8,176 kB. The temporary mountpoint was removed.
 
-## Stage 3 — BLOCKED / NOT TESTED
+## Stage 3 — PARTIAL PASS / STOPPED
 
 Before Stage 3, the following prerequisites were confirmed:
 
@@ -128,19 +129,38 @@ Before Stage 3, the following prerequisites were confirmed:
 - the module source still contained the exact `sbdata` allowlist;
 - Stage 2 produced no unexpected kernel message.
 
-The SSH transport raised `EOFError` while opening the Stage 3 command channel.
-A subsequent read-only inspection showed only `ar6000` loaded, no `sbdata`
-mount, no test directory, taint zero, and no new kernel message. Therefore the
-read/write command did not start. It was deliberately not retried.
+Two oversized SSH exec requests were rejected before execution. Short SSH
+commands worked, but one subsequent short channel also closed without an exit
+status. Read-only inspection proved no Stage 3 command had run. Because COM5
+was reliable and is an approved command path, Stage 3 was then executed there
+as individually acknowledged commands.
 
-No file, metadata, payload, checksum, or sync test was physically executed.
+The following operations physically succeeded inside the dedicated
+`sbubifs-validation` directory:
+
+- create and read a small file;
+- overwrite it with `beta-overwrite` and read it back;
+- create a directory and rename it;
+- change the renamed directory mode to `0750`;
+- create `note-link -> note.txt`;
+- create and delete a temporary file.
+
+`ls -la` confirmed the 14-byte overwritten file, eight-character symlink
+target, and `drwxr-x---` directory. The Radio then returned status 127 because
+`readlink` is not installed. Although this was a tooling absence rather than a
+filesystem error, no further writes were issued after the nonzero result. The
+planned 1 MiB payload, checksum, and sync measurement were not performed.
+
+At the stop point `MemFree` was 6,460 kB, `Dirty` was 4 kB, `Writeback` was
+zero, taint was zero, and the kernel log contained only the expected SBUBIFS
+mount messages. Production UBIFS remained mounted and readable.
 
 ## Stages 4 and 5 — NOT TESTED
 
-Persistence/remount and read/write performance were not tested because Stage
-3 did not run. Stage 1 and 2 timing resolution was one second: module load was
-at most approximately one second, while mount and unload completed within the
-same one-second uptime tick.
+Persistence/remount and payload performance were not tested because Stage 3
+stopped before the payload and Stage 4. Stage 1 and 2 timing resolution was one
+second: module load was at most approximately one second, while mount and
+unload completed within the same one-second uptime tick.
 
 ## Stage 6 — PASS for executed state
 
@@ -167,19 +187,20 @@ occurred. No reboot occurred and the second Radio was not contacted.
 3. Were both filesystem types registered simultaneously? **Yes.**
 4. Could `sbdata` mount alongside production UBIFS? **Yes, read-only.**
 5. Were there BDI or slab conflicts? **No.**
-6. Did read/write operations succeed? **NOT TESTED.**
+6. Did read/write operations succeed? **Partially: bounded small-file and
+   metadata operations succeeded; the 1 MiB payload was not attempted.**
 7. Did data survive unmount/remount? **NOT TESTED.**
 8. Additional memory? **About 588 kB loaded; mounted observation was about
    1,040 kB below the immediate pre-load sample. Most memory returned.**
 9. Kernel warnings or errors? **None attributable to SBUBIFS or storage.**
 10. Did production UBIFS remain operational? **Yes.**
 11. Was temporary test state cleaned? **Yes.**
-12. Suitable for the next milestone? **Not yet; read/write and persistence
-    validation remain required.**
+12. Suitable for the next milestone? **Not yet; payload, checksum, persistence,
+    and performance validation remain required.**
 
 The next approved run must restart at Stage 0 and may proceed to Stage 3 only
 after repeating the prerequisites. It must not infer current state from this
 run.
 
-**Final verdict: CONDITIONAL — load/unload and read-only coexistence passed;
-read/write and persistence remain untested.**
+**Final verdict: CONDITIONAL — coexistence and basic read/write metadata
+operations passed; payload and persistence remain untested.**
