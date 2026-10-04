@@ -12,15 +12,11 @@ Kernel: `2.6.26.8-rt16 #1 PREEMPT RT`, ARMv5TEJ
 
 ## Verdict
 
-**CONDITIONAL.** The module loaded and unloaded cleanly, mounted `sbdata`
-alongside production UBIFS both read-only and read-write, and completed bounded
-small-file and metadata operations. Both drivers had distinct filesystem, BDI
-and slab identities, and no kernel warning or storage error occurred.
-
-Stage 3 stopped after the Radio reported that its BusyBox installation has no
-`readlink` utility. The symlink was subsequently verified non-destructively
-with `ls -l`, but the stop policy prevented continuing to the 1 MiB payload.
-Persistence and throughput therefore remain untested.
+**PASS.** The module loaded and unloaded cleanly, mounted `sbdata` alongside
+production UBIFS read-only and read-write, completed bounded file and metadata
+operations, and preserved all test data across unmount, module unload, reload,
+and remount. Both drivers had distinct filesystem, BDI and slab identities.
+No SBUBIFS, UBIFS, or UBI warning or error occurred.
 
 ## Module identity
 
@@ -118,7 +114,7 @@ update markers.
 The filesystem was cleanly unmounted and the module was cleanly unloaded.
 `MemFree` was then 8,176 kB. The temporary mountpoint was removed.
 
-## Stage 3 — PARTIAL PASS / STOPPED
+## Stage 3 — PASS
 
 Before Stage 3, the following prerequisites were confirmed:
 
@@ -145,24 +141,59 @@ The following operations physically succeeded inside the dedicated
 - create `note-link -> note.txt`;
 - create and delete a temporary file.
 
-`ls -la` confirmed the 14-byte overwritten file, eight-character symlink
-target, and `drwxr-x---` directory. The Radio then returned status 127 because
-`readlink` is not installed. Although this was a tooling absence rather than a
-filesystem error, no further writes were issued after the nonzero result. The
-planned 1 MiB payload, checksum, and sync measurement were not performed.
+`ls -la` confirmed the 14-byte overwritten file, `note-link -> note.txt`,
+and `drwxr-x---` directory. A 1 MiB zero-filled payload was then written and
+synced. Checksums before unmount were:
 
-At the stop point `MemFree` was 6,460 kB, `Dirty` was 4 kB, `Writeback` was
-zero, taint was zero, and the kernel log contained only the expected SBUBIFS
-mount messages. Production UBIFS remained mounted and readable.
+```text
+68c5630dbd9d49f464103a6bb1fb54f4  note.txt
+b6d81b360a5672d80c27430f39153e2c  payload.bin
+```
 
-## Stages 4 and 5 — NOT TESTED
+The payload write itself took 0.14 seconds, approximately 7.1 MiB/s, before
+the separately executed explicit sync. After sync, `Dirty` and `Writeback`
+were both zero. Taint remained zero and production UBIFS stayed readable.
 
-Persistence/remount and payload performance were not tested because Stage 3
-stopped before the payload and Stage 4. Stage 1 and 2 timing resolution was one
-second: module load was at most approximately one second, while mount and
-unload completed within the same one-second uptime tick.
+## Stage 4 — PASS
 
-## Stage 6 — PASS for executed state
+The filesystem was cleanly unmounted and the module unloaded. The module was
+then reloaded and `sbdata` remounted without rebooting.
+
+Both MD5 digests matched their pre-unmount values. The 14-byte file contents,
+`0750` directory mode, symlink target, 1 MiB payload size, 510-LEB filesystem
+size, and `w4/r0` geometry persisted unchanged. Production UBIFS remained
+mounted read-write throughout.
+
+Measured wall-clock times were:
+
+| Operation | Time |
+|---|---:|
+| Module load | 0.15 s |
+| Mount | 0.20 s |
+| Unmount | 0.06 s |
+
+## Stage 5 — PASS
+
+Reading the 1 MiB payload to `/dev/null` took 0.15 seconds, approximately
+6.7 MiB/s. This small cached measurement is an operational sanity check, not a
+raw-NAND benchmark.
+
+Observed memory samples during the final run:
+
+| State | MemFree | Slab |
+|---|---:|---:|
+| Before load | 6,744 kB | 5,388 kB |
+| After load | 6,164 kB | 5,468 kB |
+| After mount | 5,612 kB | 5,492 kB |
+| After write/remount and cached payload | 4,932 kB | 5,496 kB |
+| After cleanup and unload | 7,144 kB | 5,492 kB |
+
+The load-only free-memory delta was about 580 kB. The mounted/cached low point
+was about 1.8 MiB below baseline. Free memory exceeded the baseline after
+unload as cache state changed; therefore these values demonstrate recovery but
+are not a precise unreclaimable allocation measurement.
+
+## Stage 6 — PASS
 
 Cleanup verification:
 
@@ -180,27 +211,29 @@ No startup configuration was changed. No volume was formatted, recreated,
 resized, created, or removed. No direct MTD/UBI write or production-file change
 occurred. No reboot occurred and the second Radio was not contacted.
 
+The kernel log contained UART input-overrun messages from an interrupted,
+high-rate serial upload attempt before the final Ethernet transfer. They
+preceded SBUBIFS mounting and were not storage errors. The experimental serial
+uploader was removed rather than retained as a supported tool.
+
 ## Required answers
 
 1. Did `sbubifs.ko` load successfully? **Yes.**
 2. Did it unload successfully? **Yes.**
 3. Were both filesystem types registered simultaneously? **Yes.**
-4. Could `sbdata` mount alongside production UBIFS? **Yes, read-only.**
+4. Could `sbdata` mount alongside production UBIFS? **Yes, read-only and
+   read-write.**
 5. Were there BDI or slab conflicts? **No.**
-6. Did read/write operations succeed? **Partially: bounded small-file and
-   metadata operations succeeded; the 1 MiB payload was not attempted.**
-7. Did data survive unmount/remount? **NOT TESTED.**
-8. Additional memory? **About 588 kB loaded; mounted observation was about
-   1,040 kB below the immediate pre-load sample. Most memory returned.**
+6. Did read/write operations succeed? **Yes, including the bounded 1 MiB
+   payload and metadata operations.**
+7. Did data survive unmount/remount? **Yes, including module unload/reload.**
+8. Additional memory? **About 580 kB load-only and approximately 1.8 MiB at
+   the mounted/cached low point; memory recovered after unload.**
 9. Kernel warnings or errors? **None attributable to SBUBIFS or storage.**
 10. Did production UBIFS remain operational? **Yes.**
 11. Was temporary test state cleaned? **Yes.**
-12. Suitable for the next milestone? **Not yet; payload, checksum, persistence,
-    and performance validation remain required.**
+12. Suitable for the next milestone? **Yes, subject to retaining the same
+    fail-closed identity, health, hash, and cleanup checks.**
 
-The next approved run must restart at Stage 0 and may proceed to Stage 3 only
-after repeating the prerequisites. It must not infer current state from this
-run.
-
-**Final verdict: CONDITIONAL — coexistence and basic read/write metadata
-operations passed; payload and persistence remain untested.**
+**Final verdict: PASS — physical coexistence, bounded read/write, persistence,
+memory, performance, and cleanup validation succeeded.**
