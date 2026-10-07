@@ -3,7 +3,7 @@
 
 ROOT=${SB_STORAGE_ROOT:-}
 test -n "$ROOT" || PATH=/sbin:/bin:/usr/sbin:/usr/bin
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
 APPLET_DIR=${SB_STORAGE_APPLET_DIR:-$SCRIPT_DIR}
 HELPER=$APPLET_DIR/sb-storage-helper
 BUNDLED_MODULE=$APPLET_DIR/sbubifs-authorized.ko
