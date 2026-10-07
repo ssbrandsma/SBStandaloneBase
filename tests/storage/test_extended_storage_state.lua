@@ -1,0 +1,13 @@
+package.path = arg[1] .. "/?.lua;" .. package.path
+local state = require("ExtendedStorageState")
+assert(state.statusLabel("ACTIVE") == "Active")
+assert(state.statusLabel("AVAILABLE") == "Available")
+assert(state.statusLabel("REBOOT_REQUIRED") == "Reboot required")
+assert(state.statusLabel("unexpected") == "Error")
+assert(state.stageText("COPYING_APPLETS") == "Copying applets...")
+assert(state.stageText("unknown") == nil)
+assert(state.errorText(23):find("filesystem", 1, true))
+assert(state.errorText("27"):find("Boot support", 1, true))
+assert(state.errorText(99):find("sbstorage.log", 1, true))
+assert(state.mibFromKb(1024) == "1.0 MB")
+print("extended-storage-state-tests-ok")
