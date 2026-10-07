@@ -12,8 +12,12 @@ PERSIST_DIR=$ROOT/mnt/storage/standalonebase
 PERSIST_MODULE=$ROOT/mnt/storage/sbubifs-authorized.ko
 PERSIST_BOOT=$PERSIST_DIR/storage-boot.sh
 RCS_LOCAL=$ROOT/etc/init.d/rcS.local
+UBI_CLASS=$ROOT/sys/class/ubi
+UBI=$UBI_CLASS/ubi0
+UBI_DEVICE=$ROOT/dev/ubi0
 VOLUME=$ROOT/sys/class/ubi/ubi0_5
 VOLUME_DEVICE=$ROOT/dev/ubi0_5
+UBIMKVOL=$ROOT/usr/sbin/ubimkvol
 UBIUPDATEVOL=$ROOT/usr/sbin/ubiupdatevol
 MOUNT=$ROOT/mnt/sbdata
 SOURCE=$ROOT/usr/share/jive/applets
@@ -29,6 +33,62 @@ value() { test -r "$1" && sed -n '1p' "$1" 2>/dev/null || true; }
 mounted_type() { awk -v target="$1" '$2 == target { print $3; exit }' "$MOUNTS" 2>/dev/null; }
 has_fs() { grep -q '^[[:space:]]*nodev[[:space:]]*sbubifs$' "$FILESYSTEMS" 2>/dev/null; }
 bool() { if "$@"; then say 1; else say 0; fi; }
+
+device_node() { test -c "$1" || { test -n "$ROOT" && test -e "$1"; }; }
+
+exact_sbdata() {
+    test -d "$VOLUME" \
+        && device_node "$VOLUME_DEVICE" \
+        && test "$(value "$VOLUME/name")" = sbdata \
+        && test "$(value "$VOLUME/type")" = dynamic \
+        && test "$(value "$VOLUME/alignment")" = 1 \
+        && test "$(value "$VOLUME/reserved_ebs")" = 521 \
+        && test "$(value "$VOLUME/data_bytes")" = 67221504 \
+        && test "$(value "$VOLUME/usable_eb_size")" = 129024 \
+        && test "$(value "$VOLUME/corrupted")" = 0 \
+        && test "$(value "$VOLUME/upd_marker")" = 0 \
+        && test "$(value "$UBI/min_io_size")" = 2048
+}
+
+stock_volume_exact() {
+    stock=$UBI_CLASS/ubi0_$1
+    test -d "$stock" \
+        && test "$(value "$stock/name")" = "$2" \
+        && test "$(value "$stock/type")" = dynamic \
+        && test "$(value "$stock/reserved_ebs")" = "$3" \
+        && test "$(value "$stock/data_bytes")" = "$4" \
+        && test "$(value "$stock/corrupted")" = 0 \
+        && test "$(value "$stock/upd_marker")" = 0
+}
+
+stock_volume_set_exact() {
+    stock_volume_exact 0 kernel_bak 23 2967552 || return 1
+    stock_volume_exact 1 cramfs_bak 106 13676544 || return 1
+    stock_volume_exact 2 ubifs 82 10579968 || return 1
+    stock_volume_exact 3 kernel 23 2967552 || return 1
+    stock_volume_exact 4 cramfs 106 13676544 || return 1
+    for stock in "$UBI_CLASS"/ubi0_*; do
+        test -d "$stock" || continue
+        case ${stock##*_} in 0|1|2|3|4) ;; *) return 1 ;; esac
+    done
+}
+
+virgin_layout_exact() {
+    test "$(value "$ROOT/etc/squeezeos.version")" = '7.7.3 r16676' \
+        && test -d "$UBI" \
+        && device_node "$UBI_DEVICE" \
+        && test "$(value "$UBI/total_eraseblocks")" = 1014 \
+        && test "$(value "$UBI/eraseblock_size")" = 129024 \
+        && test "$(value "$UBI/min_io_size")" = 2048 \
+        && test "$(value "$UBI/bad_peb_count")" = 0 \
+        && test "$(value "$UBI/reserved_for_bad")" = 10 \
+        && test "$(value "$UBI/avail_eraseblocks")" = 660 \
+        && stock_volume_set_exact \
+        && test ! -e "$VOLUME" \
+        && test ! -e "$VOLUME_DEVICE" \
+        && test -z "$(mounted_type "$MOUNT")" \
+        && test -z "$(mounted_type "$SOURCE")"
+}
 
 status_snapshot() {
     platform=$(value "$ROOT/proc/cpuinfo" | sed 's/^[^:]*:[[:space:]]*//')
@@ -51,38 +111,33 @@ status_snapshot() {
     init_reason=preflight_requirements_not_met
     production=$ROOT/mnt/storage
     base_supported=1
-    test -d "$ROOT/sys/class/ubi/ubi0" || base_supported=0
+    test -d "$UBI" || base_supported=0
     test "$(mounted_type "$production")" = ubifs || base_supported=0
     test -d "$SOURCE" || base_supported=0
     test -f "$ROOT/etc/init.d/rcS" && grep -q 'rcS.local' "$ROOT/etc/init.d/rcS" 2>/dev/null || base_supported=0
     state=UNAVAILABLE
     if test "$base_supported" != 1; then state=UNSUPPORTED
-    elif test "$volume_present" = 1 && test "$volume_name" != sbdata; then state=ERROR
-    elif test "$volume_present" = 1 && { test "$volume_type" != dynamic || test "$volume_corrupted" != 0 || test "$volume_update_marker" != 0; }; then state=ERROR
+    elif { test -e "$VOLUME" || test -e "$VOLUME_DEVICE"; } && ! exact_sbdata; then state=ERROR
     elif test "$bind_active" = 1 && test "$sbdata_mounted" = 1 && test "$driver_loaded" = 1; then state=ACTIVE
     elif test -f "$REBOOT_MARKER"; then state=REBOOT_REQUIRED
-    elif test "$volume_present" = 1 && test "$volume_name" = sbdata; then state=AVAILABLE
+    elif exact_sbdata || virgin_layout_exact; then state=AVAILABLE
     fi
     if test "$state" = AVAILABLE \
-        && test "$volume_type" = dynamic \
-        && test "$volume_corrupted" = 0 \
-        && test "$volume_update_marker" = 0 \
-        && test "$(value "$VOLUME/reserved_ebs")" = 521 \
-        && test "$(value "$VOLUME/data_bytes")" = 67221504 \
-        && test "$(value "$VOLUME/usable_eb_size")" = 129024 \
-        && test "$(value "$ROOT/sys/class/ubi/ubi0/min_io_size")" = 2048 \
         && test -x "$HELPER" \
         && "$HELPER" verify-module "$BUNDLED_MODULE" >/dev/null 2>&1 \
-        && "$HELPER" verify-sbdata-image "$SBDATA_IMAGE" >/dev/null 2>&1; then
+        && "$HELPER" verify-sbdata-image "$SBDATA_IMAGE" >/dev/null 2>&1 \
+        && test -x "$UBIUPDATEVOL" \
+        && { exact_sbdata || test -x "$UBIMKVOL"; }; then
         init_supported=1
-        init_reason=validated_packaged_image
+        if exact_sbdata; then init_reason=validated_packaged_image
+        else init_reason=validated_virgin_layout; fi
     fi
     say "STATUS=$state"
     say "PLATFORM=$platform"
     say "KERNEL_VERSION=$kernel"
     say "FIRMWARE_VERSION=$firmware"
     say "MTD_LAYOUT_PRESENT=$(test -r "$ROOT/proc/mtd" && echo 1 || echo 0)"
-    say "UBI_AVAILABLE=$(test -d "$ROOT/sys/class/ubi/ubi0" && echo 1 || echo 0)"
+    say "UBI_AVAILABLE=$(test -d "$UBI" && echo 1 || echo 0)"
     say "PRODUCTION_UBIFS=$(awk -v target="$production" '$2 == target && $3 == "ubifs" { print 1; found=1; exit } END { if (!found) print 0 }' "$MOUNTS" 2>/dev/null)"
     say "VOLUME_PRESENT=$volume_present"
     say "VOLUME_ID=$volume_id"
@@ -156,17 +211,8 @@ initialize() {
     supplied=$1
     : >"$LOG_FILE" || exit 27
     stage CHECKING_SYSTEM
-    test -d "$ROOT/sys/class/ubi/ubi0" || die 20 unsupported_system_or_layout
-    test -r "$VOLUME/name" || die 21 sbdata_unavailable
-    test "$(value "$VOLUME/name")" = sbdata || die 21 sbdata_identity_mismatch
-    test "$(value "$VOLUME/type")" = dynamic || die 20 sbdata_not_dynamic
-    test "$(value "$VOLUME/corrupted")" = 0 || die 20 sbdata_corrupt_or_unknown
-    test "$(value "$VOLUME/upd_marker")" = 0 || die 20 sbdata_update_marker_set
-    test "$(value "$VOLUME/reserved_ebs")" = 521 || die 20 sbdata_reserved_leb_mismatch
-    test "$(value "$VOLUME/data_bytes")" = 67221504 || die 20 sbdata_data_bytes_mismatch
-    test "$(value "$VOLUME/usable_eb_size")" = 129024 || die 20 sbdata_leb_size_mismatch
-    test "$(value "$ROOT/sys/class/ubi/ubi0/min_io_size")" = 2048 || die 20 ubi_min_io_size_mismatch
-    test -c "$VOLUME_DEVICE" || { test -n "$ROOT" && test -e "$VOLUME_DEVICE"; } || die 21 sbdata_device_node_missing
+    test -d "$UBI" || die 20 unsupported_system_or_layout
+    test "$(value "$UBI/min_io_size")" = 2048 || die 20 ubi_min_io_size_mismatch
     awk '$1 == "ubi0:sbdata" || $1 == "/dev/ubi0_5" { found=1 } END { exit found ? 0 : 1 }' "$MOUNTS" 2>/dev/null && die 20 sbdata_is_mounted
     test -d "$SOURCE" || die 20 visible_applet_tree_missing
     test -x "$HELPER" || die 20 module_verifier_missing
@@ -180,6 +226,38 @@ initialize() {
     test -f "$ROOT/etc/init.d/rcS" && grep -q 'rcS.local' "$ROOT/etc/init.d/rcS" 2>/dev/null || die 20 rcs_local_not_supported
     test -z "$(mounted_type "$SOURCE")" || die 10 already_active
     test -z "$(mounted_type "$MOUNT")" || die 20 sbdata_already_mounted
+
+    if test -e "$VOLUME" || test -e "$VOLUME_DEVICE"; then
+        test -r "$VOLUME/name" || die 21 sbdata_unavailable
+        test "$(value "$VOLUME/name")" = sbdata || die 21 sbdata_identity_mismatch
+        test "$(value "$VOLUME/type")" = dynamic || die 20 sbdata_not_dynamic
+        test "$(value "$VOLUME/alignment")" = 1 || die 20 sbdata_alignment_mismatch
+        test "$(value "$VOLUME/corrupted")" = 0 || die 20 sbdata_corrupt_or_unknown
+        test "$(value "$VOLUME/upd_marker")" = 0 || die 20 sbdata_update_marker_set
+        test "$(value "$VOLUME/reserved_ebs")" = 521 || die 20 sbdata_reserved_leb_mismatch
+        test "$(value "$VOLUME/data_bytes")" = 67221504 || die 20 sbdata_data_bytes_mismatch
+        test "$(value "$VOLUME/usable_eb_size")" = 129024 || die 20 sbdata_leb_size_mismatch
+        device_node "$VOLUME_DEVICE" || die 21 sbdata_device_node_missing
+    else
+        test "$(value "$ROOT/etc/squeezeos.version")" = '7.7.3 r16676' || die 28 unsupported_virgin_layout
+        device_node "$UBI_DEVICE" || die 28 unsupported_virgin_layout
+        test "$(value "$UBI/total_eraseblocks")" = 1014 || die 28 unsupported_virgin_layout
+        test "$(value "$UBI/eraseblock_size")" = 129024 || die 28 unsupported_virgin_layout
+        test "$(value "$UBI/bad_peb_count")" = 0 || die 28 unsupported_virgin_layout
+        test "$(value "$UBI/reserved_for_bad")" = 10 || die 28 unsupported_virgin_layout
+        available=$(value "$UBI/avail_eraseblocks")
+        case $available in ''|*[!0-9]*) die 28 unsupported_virgin_layout ;; esac
+        test "$available" -ge 521 || die 29 insufficient_ubi_capacity
+        test "$available" = 660 || die 28 unsupported_virgin_layout
+        stock_volume_set_exact || die 28 unsupported_virgin_layout
+        test -x "$UBIMKVOL" || die 30 ubimkvol_unavailable
+
+        stage CREATING_VOLUME
+        "$UBIMKVOL" "$UBI_DEVICE" -n 5 -N sbdata -S 521 -t dynamic >>"$LOG_FILE" 2>&1 \
+            || die 31 volume_creation_failure
+        exact_sbdata || die 32 post_creation_validation_failure
+        test "$(value "$UBI/avail_eraseblocks")" = 139 || die 32 post_creation_validation_failure
+    fi
 
     stage INITIALIZING_FILESYSTEM
     initialize_sbdata_filesystem || die 23 ubiupdatevol_failure

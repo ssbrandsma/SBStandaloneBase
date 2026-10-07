@@ -12,7 +12,7 @@ On initialization, the applet migrates the former bootstrap endpoint `203.0.113.
 From the repository root on Windows:
 
 ```powershell
-.\deploy_dist.cmd .\dist\StandaloneBase-0.2.5.zip root@192.0.2.22 -p1234
+.\deploy_dist.cmd .\dist\StandaloneBase-0.2.6.zip root@192.0.2.22 -p1234
 ```
 
 The command validates that the archive is a flat StandaloneBase release ZIP,

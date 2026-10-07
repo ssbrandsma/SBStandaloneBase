@@ -10,6 +10,7 @@ local labels = {
 
 local stages = {
     CHECKING_SYSTEM = "Checking system...", PREPARING_STORAGE = "Preparing storage...",
+    CREATING_VOLUME = "Creating dedicated storage volume...",
     LOADING_DRIVER = "Loading storage driver...",
     INITIALIZING_FILESYSTEM = "Initializing filesystem...",
     MOUNTING = "Mounting extended storage...", COPYING_APPLETS = "Copying applets...",
@@ -27,6 +28,11 @@ local errors = {
     [25] = "The applets could not be copied.",
     [26] = "Applet migration verification failed.",
     [27] = "Boot support could not be installed.",
+    [28] = "This Radio does not match the validated factory storage layout.",
+    [29] = "There is not enough verified free internal storage.",
+    [30] = "The UBI volume creation tool is unavailable.",
+    [31] = "The dedicated storage volume could not be created.",
+    [32] = "The newly created storage volume failed validation. It was left in place for inspection.",
 }
 
 function State.statusLabel(value) return labels[value] or "Error" end

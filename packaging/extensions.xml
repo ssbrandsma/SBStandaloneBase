@@ -2,10 +2,10 @@
 <extensions>
   <details><title lang="EN">StandaloneBase</title></details>
   <applets>
-    <applet name="StandaloneBase" version="0.2.5" target="baby" minTarget="7.7.3" maxTarget="*">
+    <applet name="StandaloneBase" version="0.2.6" target="baby" minTarget="7.7.3" maxTarget="*">
       <title lang="EN">Standalone Base</title>
       <desc lang="EN">Local LMS-compatible infrastructure services for Squeezebox Radio.</desc>
-      <changes lang="EN">Enable physically validated, explicitly confirmed Extended Storage initialization.</changes>
+      <changes lang="EN">Add strictly gated Extended Storage creation for the validated virgin 7.7.3 layout.</changes>
       <creator>Sjoerd Brandsma</creator>
     </applet>
   </applets>
