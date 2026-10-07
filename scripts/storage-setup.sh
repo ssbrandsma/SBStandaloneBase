@@ -13,6 +13,8 @@ PERSIST_MODULE=$ROOT/mnt/storage/sbubifs-authorized.ko
 PERSIST_BOOT=$PERSIST_DIR/storage-boot.sh
 RCS_LOCAL=$ROOT/etc/init.d/rcS.local
 VOLUME=$ROOT/sys/class/ubi/ubi0_5
+VOLUME_DEVICE=$ROOT/dev/ubi0_5
+UBIUPDATEVOL=$ROOT/usr/sbin/ubiupdatevol
 MOUNT=$ROOT/mnt/sbdata
 SOURCE=$ROOT/usr/share/jive/applets
 DEST=$MOUNT/applets
@@ -46,7 +48,7 @@ status_snapshot() {
         test "$#" = 3 && total=$1 && used=$2 && free=$3
     fi
     init_supported=0
-    init_reason=physical_validation_safety_gate
+    init_reason=preflight_requirements_not_met
     production=$ROOT/mnt/storage
     base_supported=1
     test -d "$ROOT/sys/class/ubi/ubi0" || base_supported=0
@@ -60,6 +62,20 @@ status_snapshot() {
     elif test "$bind_active" = 1 && test "$sbdata_mounted" = 1 && test "$driver_loaded" = 1; then state=ACTIVE
     elif test -f "$REBOOT_MARKER"; then state=REBOOT_REQUIRED
     elif test "$volume_present" = 1 && test "$volume_name" = sbdata; then state=AVAILABLE
+    fi
+    if test "$state" = AVAILABLE \
+        && test "$volume_type" = dynamic \
+        && test "$volume_corrupted" = 0 \
+        && test "$volume_update_marker" = 0 \
+        && test "$(value "$VOLUME/reserved_ebs")" = 521 \
+        && test "$(value "$VOLUME/data_bytes")" = 67221504 \
+        && test "$(value "$VOLUME/usable_eb_size")" = 129024 \
+        && test "$(value "$ROOT/sys/class/ubi/ubi0/min_io_size")" = 2048 \
+        && test -x "$HELPER" \
+        && "$HELPER" verify-module "$BUNDLED_MODULE" >/dev/null 2>&1 \
+        && "$HELPER" verify-sbdata-image "$SBDATA_IMAGE" >/dev/null 2>&1; then
+        init_supported=1
+        init_reason=validated_packaged_image
     fi
     say "STATUS=$state"
     say "PLATFORM=$platform"
@@ -107,26 +123,9 @@ die() {
 }
 
 initialize_sbdata_filesystem() {
-    # A fixture may authorize the post-write path for host tests. This is
-    # impossible on hardware because SB_STORAGE_ROOT is empty there.
-    if test -n "$ROOT" && test -r "$VOLUME/test_initialize_result"; then
-        test "$(value "$VOLUME/test_initialize_result")" = 0
-        return
-    fi
-
     printf '%s READY: all destructive preconditions and image identity verified\n' \
         "$(date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo unknown-time)" >>"$LOG_FILE"
-
-    # PHYSICAL VALIDATION SAFETY GATE
-    #
-    # Do not enable the ubiupdatevol call until this exact sbdata-empty.ubifs
-    # has been manually written to a physical Squeezebox Radio and successfully
-    # tested with sbubifs-authorized.ko. Status 23 intentionally prevents the
-    # destructive operation. After validation, replace the return below with:
-    #
-    # /usr/sbin/ubiupdatevol /dev/ubi0_5 \
-    #     /usr/share/jive/applets/StandaloneBase/sbdata-empty.ubifs
-    return 23
+    "$UBIUPDATEVOL" "$VOLUME_DEVICE" "$SBDATA_IMAGE" >>"$LOG_FILE" 2>&1
 }
 
 count_type() { find "$1" -type "$2" -print 2>/dev/null | wc -l | tr -d ' '; }
@@ -167,13 +166,13 @@ initialize() {
     test "$(value "$VOLUME/data_bytes")" = 67221504 || die 20 sbdata_data_bytes_mismatch
     test "$(value "$VOLUME/usable_eb_size")" = 129024 || die 20 sbdata_leb_size_mismatch
     test "$(value "$ROOT/sys/class/ubi/ubi0/min_io_size")" = 2048 || die 20 ubi_min_io_size_mismatch
-    test -c "$ROOT/dev/ubi0_5" || { test -n "$ROOT" && test -e "$ROOT/dev/ubi0_5"; } || die 21 sbdata_device_node_missing
+    test -c "$VOLUME_DEVICE" || { test -n "$ROOT" && test -e "$VOLUME_DEVICE"; } || die 21 sbdata_device_node_missing
     awk '$1 == "ubi0:sbdata" || $1 == "/dev/ubi0_5" { found=1 } END { exit found ? 0 : 1 }' "$MOUNTS" 2>/dev/null && die 20 sbdata_is_mounted
     test -d "$SOURCE" || die 20 visible_applet_tree_missing
     test -x "$HELPER" || die 20 module_verifier_missing
     test -f "$supplied" || die 22 authorized_module_missing
     "$HELPER" verify-module "$supplied" >>"$LOG_FILE" 2>&1 || die 22 authorized_module_identity_mismatch
-    test -x "$ROOT/usr/sbin/ubiupdatevol" || die 23 ubiupdatevol_missing
+    test -x "$UBIUPDATEVOL" || die 23 ubiupdatevol_missing
     test -f "$SBDATA_IMAGE" || die 23 sbdata_image_missing
     "$HELPER" verify-sbdata-image "$SBDATA_IMAGE" >>"$LOG_FILE" 2>&1 || die 23 sbdata_image_identity_mismatch
 
@@ -183,7 +182,7 @@ initialize() {
     test -z "$(mounted_type "$MOUNT")" || die 20 sbdata_already_mounted
 
     stage INITIALIZING_FILESYSTEM
-    initialize_sbdata_filesystem || die 23 physical_validation_safety_gate
+    initialize_sbdata_filesystem || die 23 ubiupdatevol_failure
 
     test "$(value "$VOLUME/corrupted")" = 0 || die 23 post_update_corruption_detected
     test "$(value "$VOLUME/upd_marker")" = 0 || die 23 post_update_marker_set

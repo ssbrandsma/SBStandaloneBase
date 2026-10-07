@@ -23,7 +23,17 @@ make_base() {
     printf '#!/bin/sh\ntest -x /etc/init.d/rcS.local && /etc/init.d/rcS.local\n' >"$fixture/etc/init.d/rcS"
     printf '100\n' >"$fixture/sys/class/ubi/ubi0/avail_eraseblocks"
     printf '2048\n' >"$fixture/sys/class/ubi/ubi0/min_io_size"
-    touch "$fixture/usr/sbin/ubiupdatevol"
+    cat >"$fixture/usr/sbin/ubiupdatevol" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$SB_STORAGE_ROOT/tmp/ubiupdatevol.calls"
+test "$1" = "$SB_STORAGE_ROOT/dev/ubi0_5" || exit 91
+test "$2" = "$SB_STORAGE_ROOT/usr/share/jive/applets/StandaloneBase/sbdata-empty.ubifs" || exit 92
+test "${SB_TEST_FAIL_UBIUPDATEVOL:-0}" = 1 && exit 9
+if test "${SB_TEST_FAIL_POST_WRITE_HEALTH:-0}" = 1; then
+    printf '1\n' >"$SB_STORAGE_ROOT/sys/class/ubi/ubi0_5/corrupted"
+fi
+exit 0
+EOF
     chmod 755 "$fixture/usr/sbin/ubiupdatevol"
     cp "$helper" "$fixture/usr/share/jive/applets/StandaloneBase/sb-storage-helper"
     cp "$setup" "$boot" "$module" "$image" "$fixture/usr/share/jive/applets/StandaloneBase/"
@@ -52,6 +62,7 @@ check() {
 }
 
 expect_status() { check | grep -q "^STATUS=$1$"; }
+assert_ubiupdatevol_not_called() { test ! -e "$fixture/tmp/ubiupdatevol.calls"; }
 
 # no UBI
 make_base; rm -rf "$fixture/sys/class/ubi/ubi0"; expect_status UNSUPPORTED
@@ -59,6 +70,7 @@ make_base; rm -rf "$fixture/sys/class/ubi/ubi0"; expect_status UNSUPPORTED
 make_base; expect_status UNAVAILABLE
 # valid inactive sbdata
 make_base; add_volume; expect_status AVAILABLE
+check | grep -q '^INITIALIZATION_SUPPORTED=1$'
 # active sbdata
 mkdir -p "$fixture/mnt/sbdata/applets"
 printf 'nodev\tsbubifs\n' >>"$fixture/proc/filesystems"
@@ -83,6 +95,17 @@ rc=$?
 set -e
 test "$rc" = 23
 grep -q '^ERROR=sbdata_image_identity_mismatch$' "$fixture/tmp/sbstorage.status"
+assert_ubiupdatevol_not_called
+
+# Wrong volume identity never reaches the destructive command.
+make_base; add_volume wrongname
+set +e
+SB_STORAGE_ROOT="$fixture" SB_STORAGE_APPLET_DIR="$fixture/usr/share/jive/applets/StandaloneBase" \
+    sh "$setup" initialize "$fixture/usr/share/jive/applets/StandaloneBase/sbubifs-authorized.ko" >/dev/null
+rc=$?
+set -e
+test "$rc" = 21
+assert_ubiupdatevol_not_called
 
 # Destructive preflight rechecks exact geometry, node identity and mount state.
 for field_value in 'reserved_ebs 520' 'data_bytes 1' 'usable_eb_size 1'; do
@@ -93,7 +116,18 @@ for field_value in 'reserved_ebs 520' 'data_bytes 1' 'usable_eb_size 1'; do
     rc=$?
     set -e
     test "$rc" = 20
+    assert_ubiupdatevol_not_called
 done
+
+# Minimum I/O geometry is independently mandatory.
+make_base; add_volume; printf '4096\n' >"$fixture/sys/class/ubi/ubi0/min_io_size"
+set +e
+SB_STORAGE_ROOT="$fixture" SB_STORAGE_APPLET_DIR="$fixture/usr/share/jive/applets/StandaloneBase" \
+    sh "$setup" initialize "$fixture/usr/share/jive/applets/StandaloneBase/sbubifs-authorized.ko" >/dev/null
+rc=$?
+set -e
+test "$rc" = 20
+assert_ubiupdatevol_not_called
 make_base; add_volume; rm "$fixture/dev/ubi0_5"
 set +e
 SB_STORAGE_ROOT="$fixture" SB_STORAGE_APPLET_DIR="$fixture/usr/share/jive/applets/StandaloneBase" \
@@ -101,6 +135,7 @@ SB_STORAGE_ROOT="$fixture" SB_STORAGE_APPLET_DIR="$fixture/usr/share/jive/applet
 rc=$?
 set -e
 test "$rc" = 21
+assert_ubiupdatevol_not_called
 make_base; add_volume
 printf 'ubi0:sbdata %s/mnt/elsewhere sbubifs rw 0 0\n' "$fixture" >>"$fixture/proc/mounts"
 set +e
@@ -109,19 +144,11 @@ SB_STORAGE_ROOT="$fixture" SB_STORAGE_APPLET_DIR="$fixture/usr/share/jive/applet
 rc=$?
 set -e
 test "$rc" = 20
+assert_ubiupdatevol_not_called
 
-# Real hardware path deliberately stops before destructive initialization.
+# Mocks exercise the destructive boundary and post-format transaction without
+# touching UBI or NAND.
 make_base; add_volume
-set +e
-SB_STORAGE_ROOT="$fixture" SB_STORAGE_APPLET_DIR="$fixture/usr/share/jive/applets/StandaloneBase" \
-    sh "$setup" initialize "$fixture/usr/share/jive/applets/StandaloneBase/sbubifs-authorized.ko" >/dev/null
-rc=$?
-set -e
-test "$rc" = 23
-grep -q '^EXIT_CODE=23$' "$fixture/tmp/sbstorage.status"
-
-# Fixture-only continuation exercises the post-format transaction.
-printf '0\n' >"$fixture/sys/class/ubi/ubi0_5/test_initialize_result"
 cat >"$fixture/bin/insmod" <<'EOF'
 #!/bin/sh
 test "${SB_TEST_FAIL_INSMOD:-0}" = 1 && exit 1
@@ -167,6 +194,49 @@ run_init() {
         sh "$setup" initialize "$fixture/usr/share/jive/applets/StandaloneBase/sbubifs-authorized.ko" >/dev/null
 }
 
+reset_runtime() {
+    rm -rf "$fixture/mnt/sbdata" "$fixture/mnt/storage/standalonebase"
+    rm -f "$fixture/tmp/ubiupdatevol.calls" "$fixture/tmp/sbstorage.status" "$fixture/tmp/sbstorage.log"
+    printf '0\n' >"$fixture/sys/class/ubi/ubi0_5/corrupted"
+    printf '0\n' >"$fixture/sys/class/ubi/ubi0_5/upd_marker"
+    printf 'nodev\tubifs\n' >"$fixture/proc/filesystems"
+    printf 'ubi0:ubifs %s/mnt/storage ubifs rw 0 0\n' "$fixture" >"$fixture/proc/mounts"
+}
+
+# Read-only entry points and boot never invoke initialization.
+reset_runtime
+check >/dev/null
+assert_ubiupdatevol_not_called
+set +e
+SB_STORAGE_ROOT="$fixture" SB_STORAGE_APPLET_DIR="$fixture/usr/share/jive/applets/StandaloneBase" \
+    sh "$setup" mount "$fixture/usr/share/jive/applets/StandaloneBase/sbubifs-authorized.ko" >/dev/null
+set -e
+assert_ubiupdatevol_not_called
+SB_STORAGE_ROOT="$fixture" sh "$boot"
+assert_ubiupdatevol_not_called
+
+# A valid explicit initialization reaches the exact mocked command, while a
+# command failure aborts before driver loading, mounting, or migration.
+reset_runtime
+set +e; SB_TEST_FAIL_UBIUPDATEVOL=1 run_init; rc=$?; set -e
+test "$rc" = 23
+grep -q '^ERROR=ubiupdatevol_failure$' "$fixture/tmp/sbstorage.status"
+test "$(wc -l <"$fixture/tmp/ubiupdatevol.calls" | tr -d ' ')" = 1
+test ! -d "$fixture/mnt/sbdata"
+unset SB_TEST_FAIL_UBIUPDATEVOL
+
+# Post-write health failure stops before loading, mounting, and migration.
+reset_runtime
+set +e; SB_TEST_FAIL_POST_WRITE_HEALTH=1 run_init; rc=$?; set -e
+test "$rc" = 23
+grep -q '^ERROR=post_update_corruption_detected$' "$fixture/tmp/sbstorage.status"
+test -e "$fixture/tmp/ubiupdatevol.calls"
+test ! -d "$fixture/mnt/sbdata"
+unset SB_TEST_FAIL_POST_WRITE_HEALTH
+
+# Reset the successful fixture used by all post-write workflow tests.
+reset_runtime
+
 # module load failure
 printf 'nodev\tubifs\n' >"$fixture/proc/filesystems"
 set +e; SB_TEST_FAIL_INSMOD=1 run_init; rc=$?; set -e; test "$rc" = 22
@@ -192,6 +262,8 @@ unset SB_TEST_FAIL_BOOT_INSTALL
 rm -rf "$fixture/mnt/sbdata" "$fixture/mnt/storage/standalonebase"; : >"$fixture/proc/mounts"
 printf 'ubi0:ubifs %s/mnt/storage ubifs rw 0 0\n' "$fixture" >"$fixture/proc/mounts"
 run_init
+test -s "$fixture/tmp/ubiupdatevol.calls"
+grep -q '^STAGE=COMPLETE$' "$fixture/tmp/sbstorage.status"
 grep -q '^REBOOT_REQUIRED=1$' "$fixture/tmp/sbstorage.status"
 expect_status REBOOT_REQUIRED
 test -x "$fixture/etc/init.d/rcS.local"
