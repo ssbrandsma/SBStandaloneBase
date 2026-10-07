@@ -64,8 +64,8 @@ APPLET_BIND_ACTIVE=0
 TOTAL_KB=0
 USED_KB=0
 FREE_KB=0
-INITIALIZATION_SUPPORTED=0
-INITIALIZATION_REASON=physical_validation_safety_gate
+INITIALIZATION_SUPPORTED=1
+INITIALIZATION_REASON=validated_packaged_image
 ```
 
 Status is one of `UNSUPPORTED`, `UNAVAILABLE`, `AVAILABLE`, `ACTIVE`, `ERROR`,
@@ -86,20 +86,17 @@ It reports stages through `/tmp/sbstorage.status` and diagnostics through
 `INITIALIZING_FILESYSTEM`, `LOADING_DRIVER`, `MOUNTING`, `COPYING_APPLETS`,
 `VERIFYING_APPLETS`, `INSTALLING_BOOT_SUPPORT`, `FINISHING`, and `COMPLETE`.
 
-## Physical-validation safety gate
+## Validated explicit initialization
 
 The complete initialization preflight validates the exact UBI identity,
 geometry, health, device node, unmounted state, module, legacy-generated image,
-image size and image SHA-256. `initialize_sbdata_filesystem()` then deliberately
-returns exit 23 on real hardware immediately before the intended
-`ubiupdatevol` call.
+image size and image SHA-256. After the exact packaged image passed physical
+write, mount, read/write and persistence validation, the explicitly confirmed
+`initialize` operation was enabled to run `ubiupdatevol` on `/dev/ubi0_5`.
 
-The UI exposes the explicitly confirmed workflow so its preflight and status-23
-result can be tested, but clearly reports that the physical-validation gate is
-active. The post-write transaction is exercised through an isolated fixture
-hook that is unavailable when `SB_STORAGE_ROOT` is empty. After the exact image
-passes the separate procedure in `SBDATA_EMPTY_IMAGE_PHYSICAL_VALIDATION.md`,
-the gate can be replaced by the already documented single `ubiupdatevol` call.
+No other operation calls `ubiupdatevol`: checks, mounting, boot, installation,
+upgrades, startup, UI navigation and mount failures remain non-destructive.
+Host tests replace `ubiupdatevol` with a mock and never write UBI or NAND.
 
 ## Transaction after filesystem initialization
 

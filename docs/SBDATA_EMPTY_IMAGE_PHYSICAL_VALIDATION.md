@@ -41,6 +41,11 @@ cat /sys/class/ubi/ubi0/min_io_size
 grep -E 'ubi0:sbdata|/dev/ubi0_5' /proc/mounts
 ```
 
+The native `verify-sbdata-image` result is authoritative for both image size
+and SHA-256. Do not use the Radio's BusyBox `wc -c` for this binary: physical
+validation showed an incorrect count of 1,806,309 bytes, while the actual and
+helper-verified size is 1,806,336 bytes.
+
 Required output:
 
 ```text
