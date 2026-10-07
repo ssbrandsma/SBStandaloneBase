@@ -83,7 +83,7 @@ The initialization interface is:
 
 It reports stages through `/tmp/sbstorage.status` and diagnostics through
 `/tmp/sbstorage.log`. Stage values are `CHECKING_SYSTEM`, `PREPARING_STORAGE`,
-`INITIALIZING_FILESYSTEM`, `LOADING_DRIVER`, `MOUNTING`, `COPYING_APPLETS`,
+`CREATING_VOLUME` when needed, `INITIALIZING_FILESYSTEM`, `LOADING_DRIVER`, `MOUNTING`, `COPYING_APPLETS`,
 `VERIFYING_APPLETS`, `INSTALLING_BOOT_SUPPORT`, `FINISHING`, and `COMPLETE`.
 
 ## Validated explicit initialization
@@ -97,6 +97,44 @@ write, mount, read/write and persistence validation, the explicitly confirmed
 No other operation calls `ubiupdatevol`: checks, mounting, boot, installation,
 upgrades, startup, UI navigation and mount failures remain non-destructive.
 Host tests replace `ubiupdatevol` with a mock and never write UBI or NAND.
+
+## Virgin 7.7.3 bootstrap
+
+The physically measured factory-reset baseline is firmware `7.7.3 r16676`,
+kernel `2.6.26.8-rt16`, UBI0 with 1,014 total LEBs, 660 available LEBs,
+129,024-byte LEBs, 2,048-byte minimum I/O, zero bad PEBs and ten PEBs reserved
+for bad blocks. It contains exactly these five healthy dynamic volumes:
+
+| ID | Name | Reserved LEBs | Data bytes |
+|---:|---|---:|---:|
+| 0 | `kernel_bak` | 23 | 2,967,552 |
+| 1 | `cramfs_bak` | 106 | 13,676,544 |
+| 2 | `ubifs` | 82 | 10,579,968 |
+| 3 | `kernel` | 23 | 2,967,552 |
+| 4 | `cramfs` | 106 | 13,676,544 |
+
+Only an exact match, with no volume or device node for ID 5 and no additional
+user volumes, enables creation. The explicitly confirmed initializer runs:
+
+```sh
+/usr/sbin/ubimkvol /dev/ubi0 -n 5 -N sbdata -S 521 -t dynamic
+```
+
+It never uses maximum-available sizing. It then requires ID 5 to be the exact
+healthy, dynamic, alignment-1 `sbdata` volume with 521 reserved LEBs,
+67,221,504 data bytes and a 129,024-byte usable LEB, plus exactly 139 remaining
+free LEBs. Only then does execution converge into the physically validated
+0.2.5 image-write, mount, migration and boot-support transaction.
+
+The factory layout measurements and the existing-sbdata transaction are
+physically validated. The new virgin creation/bootstrap branch is validated
+with mocks only until a separately approved physical test is performed.
+Creation failure aborts immediately. A post-creation mismatch is left in place
+for manual inspection—there is no automatic `ubirmvol`, resize, rename, repair
+or rollback. A later explicit attempt can reuse it only if it exactly matches
+the existing-sbdata profile. SqueezePlay remains running because stopping it
+triggers the Radio watchdog; initialization never stops it or bypasses the
+watchdog.
 
 ## Transaction after filesystem initialization
 
@@ -119,7 +157,9 @@ The hook preserves an existing `rcS.local` and appends one marked invocation.
 Exit codes are: 0 success, 10 already active, 20 unsupported layout, 21
 `sbdata` unavailable, 22 driver failure, 23 filesystem initialization failure,
 24 mount failure, 25 migration failure, 26 validation failure, and 27 boot
-installation failure.
+installation failure. Virgin-bootstrap-specific codes are 28 unsupported
+virgin fingerprint, 29 insufficient verified UBI capacity, 30 missing
+`ubimkvol`, 31 volume creation failure and 32 post-creation validation failure.
 
 ## Jive UI
 
@@ -139,23 +179,21 @@ uses the platform `reboot` service rather than stopping SqueezePlay.
 
 ## Host tests
 
-`tests/storage/test_extended_storage.sh` covers no UBI, missing `sbdata`, valid
-inactive and active storage, wrong identity, missing/corrupt module, the real
-exit-23 safety boundary, module/mount/migration/validation/boot-install
-failures, reboot-required state, factory-reset-like state, boot idempotence,
-and fail-open boot behavior. `test_extended_storage_state.lua` covers UI state,
-stage, capacity, and error mappings.
+`tests/storage/test_extended_storage.sh` covers the full exact virgin
+fingerprint, every creation gate, mocked creation and post-creation failures,
+the complete successful mocked bootstrap, the existing exact-sbdata path,
+module/mount/migration/validation/boot-install failures, reboot-required state,
+boot idempotence, and fail-open boot behavior. `test_extended_storage_state.lua`
+covers UI state, stage, capacity, and error mappings.
 
 These are host/fixture tests. They do not claim physical validation of the new
 integration.
 
-## Staged physical validation procedure
+## Future physical validation
 
-The UI initialization action is safe while the gate remains present: it runs
-all current preflight checks and stops with status 23 before NAND writing. Do
-not remove that gate until the separate physical procedure succeeds.
-
-The currently safe first stage is:
+The virgin bootstrap must not be described as physically validated yet. Its
+first physical execution requires separate approval, serial recovery access
+and a fresh verification of the complete fingerprint. Before approval:
 
 1. Install the package, but do not initialize.
 2. Open `Standalone Base -> Extended Storage` and record the status.
@@ -165,19 +203,16 @@ The currently safe first stage is:
    cd /usr/share/jive/applets/StandaloneBase
    /bin/sh ./storage-setup.sh check
    ./sb-storage-helper verify-module ./sbubifs-authorized.ko
-   wc -c ./sbubifs-authorized.ko
-   cat /sys/class/ubi/ubi0_5/name
-   cat /sys/class/ubi/ubi0_5/type
-   cat /sys/class/ubi/ubi0_5/corrupted
-   cat /sys/class/ubi/ubi0_5/upd_marker
+   ./sb-storage-helper verify-sbdata-image ./sbdata-empty.ubifs
+   cat /sys/class/ubi/ubi0/{total_eraseblocks,avail_eraseblocks,eraseblock_size,min_io_size,bad_peb_count,reserved_for_bad}
+   for v in /sys/class/ubi/ubi0_[0-4]; do cat "$v/name" "$v/type" "$v/reserved_ebs" "$v/data_bytes" "$v/corrupted" "$v/upd_marker"; done
    cat /proc/filesystems
    cat /proc/mounts
    ```
 
 4. Confirm shell and UI status agree. Stop here.
 
-After separate approval and implementation of the clean initializer, use this
-second stage:
+After separate approval, use this second stage:
 
 1. Start initialization from the UI and observe every displayed stage.
 2. In SSH inspect `cat /tmp/sbstorage.status` and

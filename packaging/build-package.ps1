@@ -5,7 +5,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path $PSScriptRoot -Parent
-$Version = '0.2.5'
+$Version = '0.2.6'
 $ModuleSize = 199119
 $ModuleSha256 = '63652ce67df06a78abb84a4986253bdab02fbd7b7c000779c60b3d393ba9566b'
 $ImageSize = 1806336
@@ -85,7 +85,7 @@ $Url = $BaseUrl.TrimEnd('/') + '/' + [IO.Path]::GetFileName($ZipPath)
 $Xml = @"
 <?xml version="1.0" encoding="UTF-8"?>
 <extensions><details><title lang="EN">StandaloneBase Applet Repository</title></details><applets>
-<applet name="StandaloneBase" version="$Version" target="baby" minTarget="7.7.3" maxTarget="*"><title lang="EN">Standalone Base</title><desc lang="EN">Local LMS-compatible infrastructure services for Squeezebox Radio.</desc><changes lang="EN">Enable physically validated, explicitly confirmed Extended Storage initialization.</changes><creator>Sjoerd Brandsma</creator><url>$Url</url><sha>$Sha1</sha></applet>
+<applet name="StandaloneBase" version="$Version" target="baby" minTarget="7.7.3" maxTarget="*"><title lang="EN">Standalone Base</title><desc lang="EN">Local LMS-compatible infrastructure services for Squeezebox Radio.</desc><changes lang="EN">Add strictly gated Extended Storage creation for the validated virgin 7.7.3 layout.</changes><creator>Sjoerd Brandsma</creator><url>$Url</url><sha>$Sha1</sha></applet>
 </applets></extensions>
 "@
 $Utf8 = New-Object Text.UTF8Encoding($false)

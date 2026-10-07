@@ -139,7 +139,7 @@ function menu(self)
     local menu=SimpleMenu("menu")
     for _,s in ipairs(SERVICES) do menu:addItem({text=s.name..": "..(alive(s) and "Running" or "Stopped")}) end
     menu:addItem({text="Extended Storage",callback=function() self:storageMenu() end})
-    menu:addItem({text="Version: 0.2.5"})
+    menu:addItem({text="Version: 0.2.6"})
     window:addWidget(menu); window:show()
 end
 function storageMenu(self)
@@ -154,10 +154,9 @@ function storageMenu(self)
         menu:addItem({text="Applet storage: Extended Storage",style="item_info"})
     elseif s.STATUS=="AVAILABLE" then
         menu:setHeaderWidget(Textarea("help_text","Additional internal storage is available on this Radio."))
-        menu:addItem({text="Initialize Storage",callback=function() self:confirmStorageInitialization() end})
-        if tonumber(s.INITIALIZATION_SUPPORTED)~=1 then
-            menu:addItem({text="Physical validation gate active",style="item_info"})
-        end
+        if tonumber(s.INITIALIZATION_SUPPORTED)==1 then
+            menu:addItem({text="Initialize Storage",callback=function() self:confirmStorageInitialization() end})
+        else menu:addItem({text="Initialization prerequisites unavailable",style="item_info"}) end
     elseif s.STATUS=="REBOOT_REQUIRED" then
         menu:setHeaderWidget(Textarea("help_text","Extended Storage is initialized. Restart the Radio to activate it."))
         menu:addItem({text="Restart Now",callback=function() appletManager:callService("reboot") end})
@@ -170,7 +169,7 @@ end
 function confirmStorageInitialization(self)
     local window=Window("text_list","Initialize Extended Storage?")
     local menu=SimpleMenu("menu")
-    menu:setHeaderWidget(Textarea("help_text","This erases only the dedicated sbdata StandaloneBase storage volume. Current applets will be copied. The normal firmware and settings storage will not be erased. A restart will be required."))
+    menu:setHeaderWidget(Textarea("help_text","This creates or erases a dedicated approximately 64 MB storage volume in internal flash and migrates current applets to it. The normal firmware and settings storage will not be erased. A restart will be required."))
     menu:addItem({text="Cancel",callback=function() window:hide() end})
     menu:addItem({text="Initialize",callback=function() window:hide(); self:startStorageInitialization() end})
     window:addWidget(menu); window:show()
