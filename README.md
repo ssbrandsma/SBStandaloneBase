@@ -19,3 +19,5 @@ ctest --test-dir build --output-on-failure
 See `docs/deployment.md`, `docs/recovery.md`, and `docs/testing.md` before device use.
 
 Read-only flash capacity reporting and the disabled expansion research milestone are documented in `docs/STORAGE.md`, `docs/STORAGE_TESTING.md`, and `docs/STORAGE_RECOVERY.md`.
+
+The host-tested Extended Storage integration and its explicit physical-validation boundary are documented in `docs/EXTENDED_STORAGE.md`.
