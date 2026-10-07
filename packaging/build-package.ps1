@@ -8,6 +8,8 @@ $Root = Split-Path $PSScriptRoot -Parent
 $Version = '0.2.4'
 $ModuleSize = 199119
 $ModuleSha256 = '63652ce67df06a78abb84a4986253bdab02fbd7b7c000779c60b3d393ba9566b'
+$ImageSize = 1806336
+$ImageSha256 = '34f26e33d80393c1f1f497e85dff6b78dbc6fc0e2df98ed1150ea45c6631065d'
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $Root 'dist' }
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $ZipPath = Join-Path $OutputDirectory "StandaloneBase-$Version.zip"
@@ -27,6 +29,7 @@ $Files = [ordered]@{
     'storage-setup.sh'          = (Join-Path $Root 'scripts/storage-setup.sh')
     'storage-boot.sh'           = (Join-Path $Root 'scripts/storage-boot.sh')
     'sbubifs-authorized.ko'     = (Join-Path $Root 'artifacts/sbubifs-authorized.ko')
+    'sbdata-empty.ubifs'        = (Join-Path $Root 'artifacts/ubi/sbdata-empty.ubifs')
     'index.html'                = (Join-Path $Root 'native/sbwebserver/web/index.html')
     'style.css'                 = (Join-Path $Root 'native/sbwebserver/web/css/style.css')
     'app.js'                    = (Join-Path $Root 'native/sbwebserver/web/js/app.js')
@@ -43,6 +46,13 @@ if ((Get-Item -LiteralPath $ModulePath).Length -ne $ModuleSize) {
 }
 if ((Get-FileHash -LiteralPath $ModulePath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ModuleSha256) {
     throw "Authorized SBUBIFS module has incorrect SHA-256"
+}
+$ImagePath = $Files['sbdata-empty.ubifs']
+if ((Get-Item -LiteralPath $ImagePath).Length -ne $ImageSize) {
+    throw "SBData initialization image has incorrect size"
+}
+if ((Get-FileHash -LiteralPath $ImagePath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ImageSha256) {
+    throw "SBData initialization image has incorrect SHA-256"
 }
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 Remove-Item -LiteralPath $ZipPath -Force -ErrorAction SilentlyContinue

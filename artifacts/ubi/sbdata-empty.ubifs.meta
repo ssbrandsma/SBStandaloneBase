@@ -1,0 +1,13 @@
+generator=mkfs.ubifs 1.3
+mtd_utils_commit=bb56df1e1a84304ec4a14169e4cdc41116ed4256
+command=mkfs.ubifs -r EMPTY_DIR -m 2048 -e 129024 -c 521 -x lzo -o sbdata-empty.ubifs
+size=1806336
+sha256=34f26e33d80393c1f1f497e85dff6b78dbc6fc0e2df98ed1150ea45c6631065d
+min_io_size=2048
+leb_size=129024
+leb_cnt=14
+max_leb_cnt=521
+default_compressor=1
+compressor=lzo
+format=w4/r0
+rebuild_note=Fresh filesystem UUID and dependent node CRCs make valid rebuilds non-byte-identical; geometry remains identical.
