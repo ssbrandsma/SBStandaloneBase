@@ -1,10 +1,10 @@
 {
   "catalog_version": "1",
-  "standalone_base_version": "0.2.3",
+  "standalone_base_version": "0.2.4",
   "server": {
     "name": "Standalone Base",
     "uuid": "9d989f40-499a-4b85-b92f-8dc415af2a04",
-    "host": "0.0.0.0",
+    "host": "127.0.0.1",
     "advertise_ip": "127.0.0.1",
     "http_port": 9000,
     "slimproto_port": 3483,

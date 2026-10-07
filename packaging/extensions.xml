@@ -2,10 +2,10 @@
 <extensions>
   <details><title lang="EN">StandaloneBase</title></details>
   <applets>
-    <applet name="StandaloneBase" version="0.2.3" target="baby" minTarget="7.7.3" maxTarget="*">
+    <applet name="StandaloneBase" version="0.2.4" target="baby" minTarget="7.7.3" maxTarget="*">
       <title lang="EN">Standalone Base</title>
       <desc lang="EN">Local LMS-compatible infrastructure services for Squeezebox Radio.</desc>
-      <changes lang="EN">Load the Standalone Radio and Standalone Spotify catalog from GitHub with an offline fallback.</changes>
+      <changes lang="EN">Add host-tested Extended Storage detection, UI, diagnostics and fail-open boot integration.</changes>
       <creator>Sjoerd Brandsma</creator>
     </applet>
   </applets>
