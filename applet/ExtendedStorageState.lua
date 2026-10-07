@@ -31,7 +31,12 @@ local errors = {
 
 function State.statusLabel(value) return labels[value] or "Error" end
 function State.stageText(value) return stages[value] end
-function State.errorText(value)
+function State.errorText(value, reason)
+    if reason == "physical_validation_safety_gate" then
+        return "The image passed all checks. Initialization remains locked pending physical validation."
+    elseif reason == "sbdata_image_missing" or reason == "sbdata_image_identity_mismatch" then
+        return "The Extended Storage initialization image is missing or invalid."
+    end
     return errors[tonumber(value)] or "Extended Storage initialization failed. Details are in /tmp/sbstorage.log."
 end
 function State.mibFromKb(value) return string.format("%.1f MB", (tonumber(value) or 0) / 1024) end

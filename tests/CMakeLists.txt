@@ -7,7 +7,8 @@ add_test(NAME extended_storage COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/storage/te
   ${CMAKE_SOURCE_DIR}/scripts/storage-setup.sh
   ${CMAKE_SOURCE_DIR}/scripts/storage-boot.sh
   $<TARGET_FILE:sb-storage-helper>
-  ${CMAKE_SOURCE_DIR}/artifacts/sbubifs-authorized.ko)
+  ${CMAKE_SOURCE_DIR}/artifacts/sbubifs-authorized.ko
+  ${CMAKE_SOURCE_DIR}/artifacts/ubi/sbdata-empty.ubifs)
 find_program(LUA_EXECUTABLE NAMES lua lua5.1)
 if(LUA_EXECUTABLE)
   add_test(NAME extended_storage_lua_state COMMAND ${LUA_EXECUTABLE}

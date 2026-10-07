@@ -154,10 +154,9 @@ function storageMenu(self)
         menu:addItem({text="Applet storage: Extended Storage",style="item_info"})
     elseif s.STATUS=="AVAILABLE" then
         menu:setHeaderWidget(Textarea("help_text","Additional internal storage is available on this Radio."))
-        if tonumber(s.INITIALIZATION_SUPPORTED)==1 then
-            menu:addItem({text="Initialize Extended Storage",callback=function() self:confirmStorageInitialization() end})
-        else
-            menu:addItem({text="Initialization requires validation",style="item_info"})
+        menu:addItem({text="Initialize Storage",callback=function() self:confirmStorageInitialization() end})
+        if tonumber(s.INITIALIZATION_SUPPORTED)~=1 then
+            menu:addItem({text="Physical validation gate active",style="item_info"})
         end
     elseif s.STATUS=="REBOOT_REQUIRED" then
         menu:setHeaderWidget(Textarea("help_text","Extended Storage is initialized. Restart the Radio to activate it."))
@@ -171,7 +170,7 @@ end
 function confirmStorageInitialization(self)
     local window=Window("text_list","Initialize Extended Storage?")
     local menu=SimpleMenu("menu")
-    menu:setHeaderWidget(Textarea("help_text","Existing Extended Storage data will be erased. Current applets will be copied. Normal firmware/settings storage will not be reformatted. A restart will be required."))
+    menu:setHeaderWidget(Textarea("help_text","This erases only the dedicated sbdata StandaloneBase storage volume. Current applets will be copied. The normal firmware and settings storage will not be erased. A restart will be required."))
     menu:addItem({text="Cancel",callback=function() window:hide() end})
     menu:addItem({text="Initialize",callback=function() window:hide(); self:startStorageInitialization() end})
     window:addWidget(menu); window:show()
@@ -189,7 +188,7 @@ function startStorageInitialization(self)
     end
     local function done(exitCode,status)
         if exitCode==0 then self:storageSuccess(window)
-        else self:storageError(window,tonumber(status.EXIT_CODE) or exitCode) end
+        else self:storageError(window,tonumber(status.EXIT_CODE) or exitCode,status.ERROR) end
     end
     local ok=storage:startInitialization(progress,done)
     if not ok then self:storageError(window,1) end
@@ -205,11 +204,11 @@ function storageSuccess(self,previous)
     window:addWidget(menu); window:show()
 end
 
-function storageError(self,previous,exitCode)
+function storageError(self,previous,exitCode,reason)
     if previous then previous:hide() end
     local window=Window("text_list","Extended Storage")
     local menu=SimpleMenu("menu")
-    menu:setHeaderWidget(Textarea("help_text",ExtendedStorageState.errorText(exitCode)))
+    menu:setHeaderWidget(Textarea("help_text",ExtendedStorageState.errorText(exitCode,reason)))
     menu:addItem({text="Error code: "..tostring(exitCode),style="item_info"})
     menu:addItem({text="Close",callback=function() window:hide() end})
     window:addWidget(menu); window:show()

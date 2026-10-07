@@ -7,6 +7,7 @@ SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
 APPLET_DIR=${SB_STORAGE_APPLET_DIR:-$SCRIPT_DIR}
 HELPER=$APPLET_DIR/sb-storage-helper
 BUNDLED_MODULE=$APPLET_DIR/sbubifs-authorized.ko
+SBDATA_IMAGE=$APPLET_DIR/sbdata-empty.ubifs
 PERSIST_DIR=$ROOT/mnt/storage/standalonebase
 PERSIST_MODULE=$ROOT/mnt/storage/sbubifs-authorized.ko
 PERSIST_BOOT=$PERSIST_DIR/storage-boot.sh
@@ -45,7 +46,7 @@ status_snapshot() {
         test "$#" = 3 && total=$1 && used=$2 && free=$3
     fi
     init_supported=0
-    init_reason=filesystem_initialization_not_implemented_or_validated
+    init_reason=physical_validation_safety_gate
     production=$ROOT/mnt/storage
     base_supported=1
     test -d "$ROOT/sys/class/ubi/ubi0" || base_supported=0
@@ -78,6 +79,8 @@ status_snapshot() {
     say "RCS_LOCAL_SUPPORTED=$(test -f "$ROOT/etc/init.d/rcS" && grep -q 'rcS.local' "$ROOT/etc/init.d/rcS" 2>/dev/null && echo 1 || echo 0)"
     say "BUNDLED_MODULE_PRESENT=$(test -f "$BUNDLED_MODULE" && echo 1 || echo 0)"
     say "BUNDLED_MODULE_VALID=$(test -x "$HELPER" && test -f "$BUNDLED_MODULE" && "$HELPER" verify-module "$BUNDLED_MODULE" >/dev/null 2>&1 && echo 1 || echo 0)"
+    say "SBDATA_IMAGE_PRESENT=$(test -f "$SBDATA_IMAGE" && echo 1 || echo 0)"
+    say "SBDATA_IMAGE_VALID=$(test -x "$HELPER" && test -f "$SBDATA_IMAGE" && "$HELPER" verify-sbdata-image "$SBDATA_IMAGE" >/dev/null 2>&1 && echo 1 || echo 0)"
     say "DRIVER_LOADED=$driver_loaded"
     say "SBDATA_MOUNTED=$sbdata_mounted"
     say "APPLET_BIND_ACTIVE=$bind_active"
@@ -104,12 +107,25 @@ die() {
 }
 
 initialize_sbdata_filesystem() {
-    # No clean/reinitialize implementation has yet been physically validated.
-    # A fixture may provide a result for host tests; this path is unreachable on hardware.
+    # A fixture may authorize the post-write path for host tests. This is
+    # impossible on hardware because SB_STORAGE_ROOT is empty there.
     if test -n "$ROOT" && test -r "$VOLUME/test_initialize_result"; then
         test "$(value "$VOLUME/test_initialize_result")" = 0
         return
     fi
+
+    printf '%s READY: all destructive preconditions and image identity verified\n' \
+        "$(date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo unknown-time)" >>"$LOG_FILE"
+
+    # PHYSICAL VALIDATION SAFETY GATE
+    #
+    # Do not enable the ubiupdatevol call until this exact sbdata-empty.ubifs
+    # has been manually written to a physical Squeezebox Radio and successfully
+    # tested with sbubifs-authorized.ko. Status 23 intentionally prevents the
+    # destructive operation. After validation, replace the return below with:
+    #
+    # /usr/sbin/ubiupdatevol /dev/ubi0_5 \
+    #     /usr/share/jive/applets/StandaloneBase/sbdata-empty.ubifs
     return 23
 }
 
@@ -147,10 +163,19 @@ initialize() {
     test "$(value "$VOLUME/type")" = dynamic || die 20 sbdata_not_dynamic
     test "$(value "$VOLUME/corrupted")" = 0 || die 20 sbdata_corrupt_or_unknown
     test "$(value "$VOLUME/upd_marker")" = 0 || die 20 sbdata_update_marker_set
+    test "$(value "$VOLUME/reserved_ebs")" = 521 || die 20 sbdata_reserved_leb_mismatch
+    test "$(value "$VOLUME/data_bytes")" = 67221504 || die 20 sbdata_data_bytes_mismatch
+    test "$(value "$VOLUME/usable_eb_size")" = 129024 || die 20 sbdata_leb_size_mismatch
+    test "$(value "$ROOT/sys/class/ubi/ubi0/min_io_size")" = 2048 || die 20 ubi_min_io_size_mismatch
+    test -c "$ROOT/dev/ubi0_5" || { test -n "$ROOT" && test -e "$ROOT/dev/ubi0_5"; } || die 21 sbdata_device_node_missing
+    awk '$1 == "ubi0:sbdata" || $1 == "/dev/ubi0_5" { found=1 } END { exit found ? 0 : 1 }' "$MOUNTS" 2>/dev/null && die 20 sbdata_is_mounted
     test -d "$SOURCE" || die 20 visible_applet_tree_missing
     test -x "$HELPER" || die 20 module_verifier_missing
     test -f "$supplied" || die 22 authorized_module_missing
     "$HELPER" verify-module "$supplied" >>"$LOG_FILE" 2>&1 || die 22 authorized_module_identity_mismatch
+    test -x "$ROOT/usr/sbin/ubiupdatevol" || die 23 ubiupdatevol_missing
+    test -f "$SBDATA_IMAGE" || die 23 sbdata_image_missing
+    "$HELPER" verify-sbdata-image "$SBDATA_IMAGE" >>"$LOG_FILE" 2>&1 || die 23 sbdata_image_identity_mismatch
 
     stage PREPARING_STORAGE
     test -f "$ROOT/etc/init.d/rcS" && grep -q 'rcS.local' "$ROOT/etc/init.d/rcS" 2>/dev/null || die 20 rcs_local_not_supported
@@ -158,7 +183,10 @@ initialize() {
     test -z "$(mounted_type "$MOUNT")" || die 20 sbdata_already_mounted
 
     stage INITIALIZING_FILESYSTEM
-    initialize_sbdata_filesystem || die 23 filesystem_initialization_not_implemented_or_validated
+    initialize_sbdata_filesystem || die 23 physical_validation_safety_gate
+
+    test "$(value "$VOLUME/corrupted")" = 0 || die 23 post_update_corruption_detected
+    test "$(value "$VOLUME/upd_marker")" = 0 || die 23 post_update_marker_set
 
     stage LOADING_DRIVER
     if ! has_fs; then insmod "$supplied" >>"$LOG_FILE" 2>&1 || die 22 module_load_failure; fi
@@ -199,11 +227,34 @@ initialize() {
     exit 0
 }
 
+mount_existing() {
+    supplied=$1
+    test -d "$ROOT/sys/class/ubi/ubi0" || exit 20
+    test -r "$VOLUME/name" && test "$(value "$VOLUME/name")" = sbdata || exit 21
+    test "$(value "$VOLUME/type")" = dynamic || exit 20
+    test "$(value "$VOLUME/reserved_ebs")" = 521 || exit 20
+    test "$(value "$VOLUME/data_bytes")" = 67221504 || exit 20
+    test "$(value "$VOLUME/corrupted")" = 0 || exit 20
+    test "$(value "$VOLUME/upd_marker")" = 0 || exit 20
+    test -x "$HELPER" && "$HELPER" verify-module "$supplied" >/dev/null 2>&1 || exit 22
+    if test "$(mounted_type "$MOUNT")" = sbubifs; then exit 10; fi
+    if ! has_fs; then insmod "$supplied" >/dev/null 2>&1 || exit 22; fi
+    has_fs || exit 22
+    mkdir -p "$MOUNT" || exit 24
+    mount -t sbubifs ubi0:sbdata "$MOUNT" >/dev/null 2>&1 || exit 24
+    test "$(mounted_type "$MOUNT")" = sbubifs || exit 24
+    status_snapshot
+}
+
 case ${1:-} in
     check) status_snapshot ;;
+    mount)
+        test "$#" = 2 || { echo "usage: storage-setup.sh mount PATH-TO-sbubifs-authorized.ko" >&2; exit 64; }
+        mount_existing "$2"
+        ;;
     initialize)
         test "$#" = 2 || { echo "usage: storage-setup.sh initialize PATH-TO-sbubifs-authorized.ko" >&2; exit 64; }
         initialize "$2"
         ;;
-    *) echo "usage: storage-setup.sh check | initialize PATH-TO-sbubifs-authorized.ko" >&2; exit 64 ;;
+    *) echo "usage: storage-setup.sh check | mount PATH-TO-sbubifs-authorized.ko | initialize PATH-TO-sbubifs-authorized.ko" >&2; exit 64 ;;
 esac

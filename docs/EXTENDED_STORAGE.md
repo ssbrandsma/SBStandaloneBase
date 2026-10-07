@@ -65,7 +65,7 @@ TOTAL_KB=0
 USED_KB=0
 FREE_KB=0
 INITIALIZATION_SUPPORTED=0
-INITIALIZATION_REASON=filesystem_initialization_not_implemented_or_validated
+INITIALIZATION_REASON=physical_validation_safety_gate
 ```
 
 Status is one of `UNSUPPORTED`, `UNAVAILABLE`, `AVAILABLE`, `ACTIVE`, `ERROR`,
@@ -86,21 +86,20 @@ It reports stages through `/tmp/sbstorage.status` and diagnostics through
 `INITIALIZING_FILESYSTEM`, `LOADING_DRIVER`, `MOUNTING`, `COPYING_APPLETS`,
 `VERIFYING_APPLETS`, `INSTALLING_BOOT_SUPPORT`, `FINISHING`, and `COMPLETE`.
 
-## Deliberately unimplemented initialization step
+## Physical-validation safety gate
 
-`initialize_sbdata_filesystem()` deliberately returns exit 23 on real hardware.
-Although individual image-generation and `ubiupdatevol` experiments are
-documented, the repository contains no physically validated reusable
-clean/reinitialize implementation satisfying this milestone's transaction and
-power-loss policy. No destructive UBI command has been inferred from those
-experiments.
+The complete initialization preflight validates the exact UBI identity,
+geometry, health, device node, unmounted state, module, legacy-generated image,
+image size and image SHA-256. `initialize_sbdata_filesystem()` then deliberately
+returns exit 23 on real hardware immediately before the intended
+`ubiupdatevol` call.
 
-Consequently the UI reports that initialization still requires validation.
-The remainder of the transaction is implemented and exercised only through an
-isolated fixture hook that is unavailable when `SB_STORAGE_ROOT` is empty.
-Once an exact clean-initialization implementation is separately approved, it
-can replace this single function without changing the UI, migration, boot, or
-status protocols.
+The UI exposes the explicitly confirmed workflow so its preflight and status-23
+result can be tested, but clearly reports that the physical-validation gate is
+active. The post-write transaction is exercised through an isolated fixture
+hook that is unavailable when `SB_STORAGE_ROOT` is empty. After the exact image
+passes the separate procedure in `SBDATA_EMPTY_IMAGE_PHYSICAL_VALIDATION.md`,
+the gate can be replaced by the already documented single `ubiupdatevol` call.
 
 ## Transaction after filesystem initialization
 
@@ -155,8 +154,9 @@ integration.
 
 ## Staged physical validation procedure
 
-Do not run initialization until `initialize_sbdata_filesystem()` has been
-implemented from a separately approved physical procedure.
+The UI initialization action is safe while the gate remains present: it runs
+all current preflight checks and stops with status 23 before NAND writing. Do
+not remove that gate until the separate physical procedure succeeds.
 
 The currently safe first stage is:
 
