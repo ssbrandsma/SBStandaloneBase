@@ -6,6 +6,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path $PSScriptRoot -Parent
 $Version = '0.2.3'
+$ModuleSize = 199119
+$ModuleSha256 = '63652ce67df06a78abb84a4986253bdab02fbd7b7c000779c60b3d393ba9566b'
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $Root 'dist' }
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $ZipPath = Join-Path $OutputDirectory "StandaloneBase-$Version.zip"
@@ -14,11 +16,17 @@ $Files = [ordered]@{
     'StandaloneBaseApplet.lua' = (Join-Path $Root 'applet/StandaloneBaseApplet.lua')
     'strings.txt'               = (Join-Path $Root 'applet/strings.txt')
     'StorageManager.lua'        = (Join-Path $Root 'applet/StorageManager.lua')
+    'ExtendedStorageState.lua'  = (Join-Path $Root 'applet/ExtendedStorageState.lua')
+    'TimeSync.lua'              = (Join-Path $Root 'applet/TimeSync.lua')
+    'TimeResolver.lua'          = (Join-Path $Root 'applet/TimeResolver.lua')
     'sbbase'                    = (Join-Path $Root 'build-arm/sbbase')
     'sbwebserver'               = (Join-Path $Root 'build-arm/sbwebserver')
     'sbproxy'                   = (Join-Path $Root 'build-arm/sbproxy')
     'sb-storage-helper'         = (Join-Path $Root 'build-arm/sb-storage-helper')
-    'sbdata-boot.sh'            = (Join-Path $Root 'scripts/sbdata-boot.sh')
+    'sb-storage-updater'        = (Join-Path $Root 'build-arm/sb-storage-updater')
+    'storage-setup.sh'          = (Join-Path $Root 'scripts/storage-setup.sh')
+    'storage-boot.sh'           = (Join-Path $Root 'scripts/storage-boot.sh')
+    'sbubifs-authorized.ko'     = (Join-Path $Root 'artifacts/sbubifs-authorized.ko')
     'index.html'                = (Join-Path $Root 'native/sbwebserver/web/index.html')
     'style.css'                 = (Join-Path $Root 'native/sbwebserver/web/css/style.css')
     'app.js'                    = (Join-Path $Root 'native/sbwebserver/web/js/app.js')
@@ -28,6 +36,13 @@ $Files = [ordered]@{
 }
 foreach ($Pair in $Files.GetEnumerator()) {
     if (-not (Test-Path -LiteralPath $Pair.Value -PathType Leaf)) { throw "Missing package input: $($Pair.Value)" }
+}
+$ModulePath = $Files['sbubifs-authorized.ko']
+if ((Get-Item -LiteralPath $ModulePath).Length -ne $ModuleSize) {
+    throw "Authorized SBUBIFS module has incorrect size"
+}
+if ((Get-FileHash -LiteralPath $ModulePath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ModuleSha256) {
+    throw "Authorized SBUBIFS module has incorrect SHA-256"
 }
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 Remove-Item -LiteralPath $ZipPath -Force -ErrorAction SilentlyContinue

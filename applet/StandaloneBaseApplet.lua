@@ -2,11 +2,15 @@ local oo = require("loop.simple")
 local Applet = require("jive.Applet")
 local Framework = require("jive.ui.Framework")
 local SimpleMenu = require("jive.ui.SimpleMenu")
+local Textarea = require("jive.ui.Textarea")
 local Window = require("jive.ui.Window")
 local Timer = require("jive.ui.Timer")
 local StorageManager = require("applets.StandaloneBase.StorageManager")
+local ExtendedStorageState = require("applets.StandaloneBase.ExtendedStorageState")
+local TimeSync = require("applets.StandaloneBase.TimeSync")
 local io, os, tonumber, tostring = io, os, tonumber, tostring
 local ipairs, pairs, math = ipairs, pairs, math
+local appletManager = appletManager
 module(..., Framework.constants)
 oo.class(_M, Applet)
 
@@ -23,6 +27,7 @@ local started = false
 local storage = StorageManager:new(ROOT)
 local BOOTSTRAP_IP_PATTERN = "49%.12%.198%.91"
 local LOCAL_IP = "127.0.0.1"
+local SERVER_UUID = "9d989f40-499a-4b85-b92f-8dc415af2a04"
 local SETTINGS_DIR = "/etc/squeezeplay/userpath/settings"
 local SERVER_SETTINGS = {
     "ChooseMusicSource.lua",
@@ -37,6 +42,14 @@ local function redirectBootstrapServer()
         if f then
             local original=f:read("*a"); f:close()
             local updated,n=original:gsub(BOOTSTRAP_IP_PATTERN,LOCAL_IP)
+            if name == "ChooseMusicSource.lua" then
+                local normalized,m=updated:gsub('poll%s*=%s*%b{}','poll={["127.0.0.1"]="127.0.0.1",}')
+                updated,n=normalized,n+m
+            end
+            if original:find(SERVER_UUID,1,true) or original:find('serverName="StandaloneBase"',1,true) then
+                local normalized,m=updated:gsub('(serverInit%s*=%s*{%s*ip%s*=%s*)"[^"]+"','%1"'..LOCAL_IP..'"')
+                updated,n=normalized,n+m
+            end
             if n > 0 then
                 local backup=path..".pre-standalonebase"
                 local b=io.open(backup,"r")
@@ -98,11 +111,13 @@ end
 function init(self)
     if started then return end; started=true
     os.execute("mkdir -p "..RUN.." /mnt/storage/standalonebase")
+    os.execute("chmod 755 "..ROOT.."/sb-storage-helper "..ROOT.."/storage-setup.sh "..ROOT.."/storage-boot.sh >/dev/null 2>&1")
     redirectBootstrapServer()
     self.failures={}; self.backoff={}
     launch(SERVICES[1])
     refreshConfig()
     for i=2,#SERVICES do if not launch(SERVICES[i]) then self.failures[SERVICES[i].exe]=1 end end
+    self.timeSync=TimeSync.new(); self.timeSync:start()
     self.monitor=Timer(15000,function() self:supervise() end); self.monitor:start()
 end
 function startServices(self)
@@ -123,23 +138,80 @@ function menu(self)
     local window=Window("text_list","Standalone Base")
     local menu=SimpleMenu("menu")
     for _,s in ipairs(SERVICES) do menu:addItem({text=s.name..": "..(alive(s) and "Running" or "Stopped")}) end
-    menu:addItem({text="Storage",callback=function() self:storageMenu() end})
+    menu:addItem({text="Extended Storage",callback=function() self:storageMenu() end})
     menu:addItem({text="Version: 0.2.3"})
     window:addWidget(menu); window:show()
 end
-local function mib(v) return string.format("%.1f MiB",(tonumber(v) or 0)/1048576) end
 function storageMenu(self)
-    local i=storage:getStorageInfo()
-    local s=storage:getStorageStatus()
-    local window=Window("text_list","Storage")
+    local s=storage:check()
+    local window=Window("text_list","Extended Storage")
     local menu=SimpleMenu("menu")
-    menu:addItem({text="Used: "..mib((i.filesystem_total_bytes or 0)-(i.filesystem_free_bytes or 0))})
-    menu:addItem({text="Available: "..mib(i.filesystem_free_bytes)})
-    menu:addItem({text="Total: "..mib(i.filesystem_total_bytes)})
-    menu:addItem({text="Flash expansion: "..(i.compatible=="true" and "Supported (disabled)" or "Unavailable")})
-    menu:addItem({text="Target: "..mib(i.target_bytes)})
-    menu:addItem({text="sbdata: "..(s.installation_state or "unknown")})
-    menu:addItem({text="Storage installation disabled"})
+    menu:addItem({text="Status: "..ExtendedStorageState.statusLabel(s.STATUS),style="item_info"})
+    if s.STATUS=="ACTIVE" then
+        menu:addItem({text="Capacity: "..ExtendedStorageState.mibFromKb(s.TOTAL_KB),style="item_info"})
+        menu:addItem({text="Used: "..ExtendedStorageState.mibFromKb(s.USED_KB),style="item_info"})
+        menu:addItem({text="Free: "..ExtendedStorageState.mibFromKb(s.FREE_KB),style="item_info"})
+        menu:addItem({text="Applet storage: Extended Storage",style="item_info"})
+    elseif s.STATUS=="AVAILABLE" then
+        menu:setHeaderWidget(Textarea("help_text","Additional internal storage is available on this Radio."))
+        if tonumber(s.INITIALIZATION_SUPPORTED)==1 then
+            menu:addItem({text="Initialize Extended Storage",callback=function() self:confirmStorageInitialization() end})
+        else
+            menu:addItem({text="Initialization requires validation",style="item_info"})
+        end
+    elseif s.STATUS=="REBOOT_REQUIRED" then
+        menu:setHeaderWidget(Textarea("help_text","Extended Storage is initialized. Restart the Radio to activate it."))
+        menu:addItem({text="Restart Now",callback=function() appletManager:callService("reboot") end})
+    else
+        menu:setHeaderWidget(Textarea("help_text","Extended Storage cannot be initialized on the detected storage layout."))
+    end
+    window:addWidget(menu); window:show()
+end
+
+function confirmStorageInitialization(self)
+    local window=Window("text_list","Initialize Extended Storage?")
+    local menu=SimpleMenu("menu")
+    menu:setHeaderWidget(Textarea("help_text","Existing Extended Storage data will be erased. Current applets will be copied. Normal firmware/settings storage will not be reformatted. A restart will be required."))
+    menu:addItem({text="Cancel",callback=function() window:hide() end})
+    menu:addItem({text="Initialize",callback=function() window:hide(); self:startStorageInitialization() end})
+    window:addWidget(menu); window:show()
+end
+
+function startStorageInitialization(self)
+    local window=Window("text_list","Extended Storage")
+    window:setAllowScreensaver(false)
+    local menu=SimpleMenu("menu")
+    local stageItem={text="Checking system...",style="item_info"}
+    menu:addItem(stageItem); window:addWidget(menu); window:show()
+    local function progress(status)
+        local text=ExtendedStorageState.stageText(status.STAGE)
+        if text then menu:setText(stageItem,text) end
+    end
+    local function done(exitCode,status)
+        if exitCode==0 then self:storageSuccess(window)
+        else self:storageError(window,tonumber(status.EXIT_CODE) or exitCode) end
+    end
+    local ok=storage:startInitialization(progress,done)
+    if not ok then self:storageError(window,1) end
+end
+
+function storageSuccess(self,previous)
+    if previous then previous:hide() end
+    local window=Window("text_list","Extended Storage")
+    local menu=SimpleMenu("menu")
+    menu:setHeaderWidget(Textarea("help_text","Extended Storage initialized successfully. Your applets have been migrated. Restart the Radio to activate Extended Storage."))
+    menu:addItem({text="Restart Now",callback=function() appletManager:callService("reboot") end})
+    menu:addItem({text="Later",callback=function() window:hide() end})
+    window:addWidget(menu); window:show()
+end
+
+function storageError(self,previous,exitCode)
+    if previous then previous:hide() end
+    local window=Window("text_list","Extended Storage")
+    local menu=SimpleMenu("menu")
+    menu:setHeaderWidget(Textarea("help_text",ExtendedStorageState.errorText(exitCode)))
+    menu:addItem({text="Error code: "..tostring(exitCode),style="item_info"})
+    menu:addItem({text="Close",callback=function() window:hide() end})
     window:addWidget(menu); window:show()
 end
 function getStandaloneStorageInfo(self) return storage:getStorageInfo() end
@@ -149,6 +221,8 @@ function getStandaloneStoragePreparation(self) return storage:getStoragePreparat
 function verifyStandaloneStorage(self) return storage:verifyStorage() end
 function free(self)
     if self.monitor then self.monitor:stop() end
+    if self.timeSync then self.timeSync:stop(); self.timeSync=nil end
+    storage:stop()
     for _,t in pairs(self.backoff or {}) do t:stop() end
     for i=#SERVICES,1,-1 do stop(SERVICES[i]) end
     started=false; return true
