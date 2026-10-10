@@ -7,6 +7,18 @@ Installation copies the applet to `/usr/share/jive/applets/StandaloneBase`. On i
 The packaged `config.json` provides an offline catalog containing Standalone Radio and Standalone Spotify. At startup the applet starts its loopback HTTPS proxy, retrieves `https://raw.githubusercontent.com/ssbrandsma/SBStandaloneBase/master/config.json`, validates that both expected applet identifiers are present, and atomically replaces `/mnt/storage/standalonebase/config.json`. If retrieval or validation fails, the last valid persistent file—or the packaged fallback on first boot—is retained. `sbbase` reads that file and returns its two entries for the Applet Installer `jiveapplets` request.
 
 On initialization, the applet migrates the former bootstrap endpoint `49.12.198.91` to the local endpoint `127.0.0.1` in the SqueezePlay server-selection settings. Before changing a file, it preserves its original contents once in a sibling `.pre-standalonebase` backup. The exact-address replacement is idempotent and does not modify other configured servers.
+
+StandaloneBase also runs `patch-squeezeplay-artwork.sh` against the active
+`/usr/share/jive/jive/slim/SlimServer.lua`. It first treats explicit native
+loopback support or complete removal of `/public/imageproxy` as **not needed**.
+It patches only when the old `jnt:getSNHostname()` image-proxy expression and
+both expected private-address anchors occur exactly once. It then saves the
+original once as `SlimServer.lua.pre-standalonebase` and adds only direct-fetch
+exceptions for `127.0.0.1` and `localhost`. Alternative or ambiguous proxy
+implementations are left untouched and reported as unsupported in
+`/tmp/standalonebase/artwork-patch.log`. A newly
+applied patch requires SqueezePlay to restart because the Lua module is loaded
+before the applet initializes.
 # Deploying a dist package to a Radio
 
 From the repository root on Windows:
@@ -17,8 +29,11 @@ From the repository root on Windows:
 
 The command validates that the archive is a flat StandaloneBase release ZIP,
 uploads it over SSH, verifies the packaged module and initialization image on
-the Radio, atomically updates both applet locations and the persistent runtime
-configuration, and restarts SqueezePlay. It never invokes Extended Storage
+the Radio, atomically updates the applet through the merged `/usr` UnionFS path
+and updates the persistent runtime configuration, then restarts SqueezePlay.
+It deliberately never writes an applet directly through `/mnt/storage/usr`:
+on SqueezeOS that can create a recursive `/mnt/storage/mnt/storage/usr` copy in
+the small writable UBIFS branch. It never invokes Extended Storage
 initialization. Use `--no-restart` to leave SqueezePlay running or `--dry-run`
 to perform only local package validation. Unknown SSH host keys are rejected;
 use `--accept-new-host-key` for a new Radio after independently confirming its

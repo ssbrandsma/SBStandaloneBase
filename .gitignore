@@ -2,5 +2,9 @@
 /build-arm/
 /build-package/
 /dist/
+/.downloads/
+/build-np/
+/screenshots/
+__pycache__/
 *.log
 *.pid

@@ -6,7 +6,7 @@ With explicit authorization and a recoverable Radio:
 
 1. Install the ZIP through Remote Library while retaining the previous server.
 2. Confirm all three PIDs and health endpoints; measure RSS, CPU, startup time and storage.
-3. Verify UDP/TCP 3483 and HTTP 9000 from the LAN.
+3. Verify UDP/TCP 3483 and HTTP 9000 on loopback, then verify that TCP 3483/9000 refuse connections through the Radio's LAN address and that UDP discovery receives no LAN response.
 4. Exercise handshake/connect/Jive startup and Applet Installer catalog display.
 5. Record the current server, attempt a non-persistent local selection, and confirm actual SlimProto plus CometD connections.
 6. Only after confirmation, persist localhost/local identity. Reboot and repeat offline.
@@ -18,6 +18,17 @@ Do not execute step 5 or later without user authorization.
 ## Current automated result
 
 The supplied Bootlin GCC 8.4.0 toolchain builds all three services as stripped, static ELF32 ARM EABI5 soft-float binaries. QEMU `arm926` executes `sbbase --self-test` successfully. Current file sizes are 37,960 bytes (`sbbase`), 107,640 bytes (`sbwebserver`), and 833,676 bytes (`sbproxy`). The generated ZIP contains only the applet runtime, three binaries, web assets, configuration/catalog fallback, and CA bundle. These results establish build/ABI compatibility only; they are not a substitute for Radio validation.
+
+The applet-repository integration test starts the host web server against an
+isolated configuration and repository. It verifies authenticated streaming
+multipart upload, unauthorized rejection, invalid ZIP rejection, duplicate
+version conflict, SHA-1 over exact bytes, preservation of unrelated config,
+GET/HEAD package serving, metadata edit, catalog removal, and optional local
+package deletion. The same test passes with AddressSanitizer and Undefined
+Behavior Sanitizer enabled. The rebuilt `sbwebserver` is a stripped, static
+ARM EABI5 soft-float binary and the existing QEMU ARMv5 suite passes. Physical
+Applet Installer behavior remains unclaimed pending the separately approved
+procedure in `APPLET_REPOSITORY.md`.
 
 On 2026-10-02 the package was installed on a stock 7.7.3 r16676 Radio at the user's direction. Native ARM execution, TCP 3483/9000, UDP discovery, HTTP health, Bayeux handshake, loopback proxy health, applet registration, and process startup passed. Measured idle RSS was approximately 96 KiB for `sbbase` and 220 KiB for `sbproxy`. The existing standalone `sbwebserver` remained on port 80, so the bundled webserver detected the conflict and exited without disturbing the other services. Local LMS selection was not changed.
 

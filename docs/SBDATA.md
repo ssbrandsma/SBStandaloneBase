@@ -30,7 +30,8 @@ Updating StandaloneBase through Applet Installer while the bind is active writes
 
 - Physical evidence: base UBI geometry, UnionFS ordering, bind behavior, and original-directory restoration after unmount.
 - Simulated evidence: discovery, preflight rejection paths, complete/partial/absent status, verification, boot mount/bind failures, and fallback unmount.
-- Not tested: creating/formatting `sbdata`, old-kernel mount of its final image, full metadata migration, Applet Installer writes, reboot persistence, power loss, firmware upgrade, factory reset, and recovery from an interrupted transaction.
+- Physically validated in RAM only: the pinned native ARMv5 `mkfs.ubifs` 1.3 generates a compact 521-LEB-ceiling `w4/r0` image under `/tmp`; see `SBDATA_NATIVE_MKFS_VALIDATION.md`.
+- Not tested: creating/formatting `sbdata`, writing the image to UBI, old-kernel mount/growth of its final image, full metadata migration, Applet Installer writes, reboot persistence, power loss, firmware upgrade, factory reset, and recovery from an interrupted transaction.
 
 ## Next safe hardware test
 

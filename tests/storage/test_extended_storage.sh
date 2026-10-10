@@ -122,6 +122,11 @@ make_base; rm -rf "$fixture/sys/class/ubi/ubi0_4"; expect_status UNAVAILABLE
 make_base; expect_status AVAILABLE
 check | grep -q '^INITIALIZATION_SUPPORTED=1$'
 check | grep -q '^INITIALIZATION_REASON=validated_virgin_layout$'
+# Static SqueezeOS device nodes do not establish that a UBI volume exists.
+# Only the kernel's sysfs volume entry is authoritative.
+make_base; touch "$fixture/dev/ubi0_5"; expect_status AVAILABLE
+check | grep -q '^VOLUME_PRESENT=0$'
+check | grep -q '^INITIALIZATION_SUPPORTED=1$'
 # valid inactive sbdata
 make_base; add_volume; expect_status AVAILABLE
 check | grep -q '^INITIALIZATION_SUPPORTED=1$'
@@ -161,7 +166,6 @@ make_base; printf 'static\n' >"$fixture/sys/class/ubi/ubi0_4/type"; expect_precr
 make_base; printf '1\n' >"$fixture/sys/class/ubi/ubi0_0/corrupted"; expect_precreate_failure 28
 make_base; printf '1\n' >"$fixture/sys/class/ubi/ubi0_3/upd_marker"; expect_precreate_failure 28
 make_base; add_volume wrongname; expect_precreate_failure 21
-make_base; touch "$fixture/dev/ubi0_5"; expect_precreate_failure 21
 make_base; printf x >>"$fixture/usr/share/jive/applets/StandaloneBase/sbdata-empty.ubifs"; expect_precreate_failure 23
 make_base; printf x >>"$fixture/usr/share/jive/applets/StandaloneBase/sbubifs-authorized.ko"; expect_precreate_failure 22
 make_base; rm "$fixture/usr/sbin/ubimkvol"; expect_precreate_failure 30
@@ -382,6 +386,7 @@ printf 'ubi0:ubifs %s/mnt/storage ubifs rw 0 0\n' "$fixture" >"$fixture/proc/mou
 run_init
 assert_ubimkvol_not_called
 test -s "$fixture/tmp/ubiupdatevol.calls"
+
 grep -q '^STAGE=COMPLETE$' "$fixture/tmp/sbstorage.status"
 grep -q '^REBOOT_REQUIRED=1$' "$fixture/tmp/sbstorage.status"
 expect_status REBOOT_REQUIRED
@@ -399,9 +404,10 @@ mounts_before=$(cat "$fixture/proc/mounts")
 SB_STORAGE_ROOT="$fixture" sh "$boot"
 test "$mounts_before" = "$(cat "$fixture/proc/mounts")"
 
-# Complete virgin bootstrap: create, validate, update and reuse the unchanged
-# mount/migration/boot-support transaction.
+# Complete virgin bootstrap with the static device node found on SqueezeOS:
+# create, validate, update and reuse the unchanged transaction.
 reset_virgin
+touch "$fixture/dev/ubi0_5"
 run_init
 test "$(cat "$fixture/tmp/ubimkvol.calls")" = "$fixture/dev/ubi0 -n 5 -N sbdata -S 521 -t dynamic"
 test -s "$fixture/tmp/ubiupdatevol.calls"

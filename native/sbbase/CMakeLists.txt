@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 project(sbbase C)
-add_executable(sbbase src/main.c src/protocol.c)
+add_executable(sbbase src/main.c src/protocol.c src/nowplaying.c)
 target_include_directories(sbbase PRIVATE include)
 target_compile_definitions(sbbase PRIVATE _POSIX_C_SOURCE=200809L)
 if(NOT MSVC)

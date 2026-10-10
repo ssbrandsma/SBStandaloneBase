@@ -1,0 +1,13 @@
+FROM ubuntu:24.04
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git make gcc patch file xz-utils bzip2 && \
+    rm -rf /var/lib/apt/lists/*
+ARG TOOLCHAIN_URL=https://toolchains.bootlin.com/downloads/releases/toolchains/armv5-eabi/tarballs/armv5-eabi--musl--stable-2020.02-2.tar.bz2
+RUN curl -fL "$TOOLCHAIN_URL" -o /tmp/toolchain.tar.bz2 && \
+    echo '4734ebcde0fa185132f0fa6aebe104a05ed78b28ba97290504e9f599c948ba1c  /tmp/toolchain.tar.bz2' | sha256sum -c - && \
+    mkdir -p /opt/toolchains && tar -xjf /tmp/toolchain.tar.bz2 -C /opt/toolchains && rm /tmp/toolchain.tar.bz2
+COPY . /src
+ENV ARM_TOOLCHAIN_DIR=/opt/toolchains/armv5-eabi--musl--stable-2020.02-2
+RUN chmod +x /src/tools/ubi/build-arm-mkfs.sh && /src/tools/ubi/build-arm-mkfs.sh
+ENTRYPOINT ["/src/artifacts/ubi/mkfs.ubifs-20090605-armv5-static"]

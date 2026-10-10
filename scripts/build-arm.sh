@@ -27,7 +27,7 @@ mkdir -p "$out"
 
 "$cc" -static $flags -std=c99 -Wall -Wextra -Wpedantic -Wl,--gc-sections \
   -I"$root/native/sbbase/include" "$root/native/sbbase/src/main.c" \
-  "$root/native/sbbase/src/protocol.c" -o "$out/sbbase"
+  "$root/native/sbbase/src/protocol.c" "$root/native/sbbase/src/nowplaying.c" -o "$out/sbbase"
 
 "$cc" -static $flags -std=c99 -Wall -Wextra -pthread -Wl,--gc-sections \
   -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -DMG_ENABLE_EPOLL=0 -DMG_ENABLE_POLL=1 \
@@ -42,10 +42,13 @@ mkdir -p "$out"
 "$cc" -static $flags -std=c99 -Wall -Wextra -Wpedantic -Wl,--gc-sections \
   "$root/native/sbstorage/sb_storage_helper.c" -o "$out/sb-storage-helper"
 
-"$strip" --strip-all "$out/sbbase" "$out/sbwebserver" "$out/sbproxy" "$out/sb-storage-helper"
-file "$out/sbbase" "$out/sbwebserver" "$out/sbproxy" "$out/sb-storage-helper"
-"$size" "$out/sbbase" "$out/sbwebserver" "$out/sbproxy" "$out/sb-storage-helper"
-for binary in sbbase sbwebserver sbproxy sb-storage-helper; do
+"$cc" -static $flags -std=c99 -Wall -Wextra -Wpedantic -Wl,--gc-sections \
+  "$root/native/sbstorage/sb_storage_updater.c" -o "$out/sb-storage-updater"
+
+"$strip" --strip-all "$out/sbbase" "$out/sbwebserver" "$out/sbproxy" "$out/sb-storage-helper" "$out/sb-storage-updater"
+file "$out/sbbase" "$out/sbwebserver" "$out/sbproxy" "$out/sb-storage-helper" "$out/sb-storage-updater"
+"$size" "$out/sbbase" "$out/sbwebserver" "$out/sbproxy" "$out/sb-storage-helper" "$out/sb-storage-updater"
+for binary in sbbase sbwebserver sbproxy sb-storage-helper sb-storage-updater; do
   if readelf -l "$out/$binary" | grep -q INTERP; then echo "$binary unexpectedly has an ELF interpreter" >&2; exit 1; fi
   if readelf -d "$out/$binary" 2>/dev/null | grep -q NEEDED; then echo "$binary unexpectedly has shared dependencies" >&2; exit 1; fi
 done

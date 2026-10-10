@@ -28,6 +28,7 @@ $Files = [ordered]@{
     'sb-storage-updater'        = (Join-Path $Root 'build-arm/sb-storage-updater')
     'storage-setup.sh'          = (Join-Path $Root 'scripts/storage-setup.sh')
     'storage-boot.sh'           = (Join-Path $Root 'scripts/storage-boot.sh')
+    'patch-squeezeplay-artwork.sh' = (Join-Path $Root 'scripts/patch-squeezeplay-artwork.sh')
     'sbubifs-authorized.ko'     = (Join-Path $Root 'artifacts/sbubifs-authorized.ko')
     'sbdata-empty.ubifs'        = (Join-Path $Root 'artifacts/ubi/sbdata-empty.ubifs')
     'index.html'                = (Join-Path $Root 'native/sbwebserver/web/index.html')
