@@ -5,11 +5,12 @@ local SimpleMenu = require("jive.ui.SimpleMenu")
 local Textarea = require("jive.ui.Textarea")
 local Window = require("jive.ui.Window")
 local Timer = require("jive.ui.Timer")
+local SlimServer = require("jive.slim.SlimServer")
 local StorageManager = require("applets.StandaloneBase.StorageManager")
 local ExtendedStorageState = require("applets.StandaloneBase.ExtendedStorageState")
 local TimeSync = require("applets.StandaloneBase.TimeSync")
 local io, os, tonumber, tostring = io, os, tonumber, tostring
-local ipairs, pairs, math = ipairs, pairs, math
+local ipairs, pairs, math, pcall = ipairs, pairs, math, pcall
 local appletManager = appletManager
 module(..., Framework.constants)
 oo.class(_M, Applet)
@@ -34,6 +35,37 @@ local SERVER_SETTINGS = {
     "Playback.lua",
     "SlimDiscovery.lua",
 }
+local ARTWORK_PATCH = ROOT.."/patch-squeezeplay-artwork.sh"
+local SLIMSERVER_LUA = "/usr/share/jive/jive/slim/SlimServer.lua"
+
+local function patchLoopbackArtwork()
+    -- On an Applet Installer reboot this prepares the active firmware file for
+    -- the next SqueezePlay process. Package deployment runs the same helper
+    -- before restarting SqueezePlay, so the change takes effect immediately.
+    os.execute("chmod 755 "..ARTWORK_PATCH.." >/dev/null 2>&1")
+    return os.execute(ARTWORK_PATCH.." "..SLIMSERVER_LUA.." >>"..RUN.."/artwork-patch.log 2>&1") == 0
+end
+
+-- mysqueezebox.com has been retired, but older SqueezePlay builds can retain
+-- its SlimServer object and continuously retry its Comet connection.  Besides
+-- wasting resources, those retries make the Radio show a misleading
+-- "Connecting to Standalone Base" overlay while the loopback server is fine.
+-- Disconnect only the retired cloud object; never touch the local LMS object.
+local function suppressRetiredCloudServer()
+    for _,server in SlimServer:iterate() do
+        local ok,name=pcall(function() return server:getName() end)
+        if ok and name == "mysqueezebox.com" then
+            -- UI code can call connect() again after a normal disconnect.
+            -- Shadow the instance methods so the retired service stays inert.
+            if not server._standaloneBaseCloudBlocked then
+                server._standaloneBaseCloudBlocked=true
+                server.connect=function() return nil end
+                server.reconnect=function() return nil end
+            end
+            pcall(function() server:disconnect() end)
+        end
+    end
+end
 
 local function redirectBootstrapServer()
     for _,name in ipairs(SERVER_SETTINGS) do
@@ -94,6 +126,10 @@ end
 local function refreshConfig()
     local f=io.open(CONFIG,"r")
     if f then f:close() else os.execute("cp "..ROOT.."/config.json "..CONFIG) end
+    -- A catalog edited through the local repository UI is authoritative.
+    -- Automatic upstream refresh must not discard uploaded packages or edits.
+    local managed=io.open("/mnt/storage/standalonebase/.catalog-local","r")
+    if managed then managed:close(); return end
     local tmp=RUN.."/config.json.download"
     os.remove(tmp)
     local ok=os.execute("wget -q -T 20 -O "..tmp.." "..REMOTE_CONFIG)
@@ -113,6 +149,8 @@ function init(self)
     os.execute("mkdir -p "..RUN.." /mnt/storage/standalonebase")
     os.execute("chmod 755 "..ROOT.."/sb-storage-helper "..ROOT.."/storage-setup.sh "..ROOT.."/storage-boot.sh >/dev/null 2>&1")
     redirectBootstrapServer()
+    patchLoopbackArtwork()
+    suppressRetiredCloudServer()
     self.failures={}; self.backoff={}
     launch(SERVICES[1])
     refreshConfig()
@@ -124,6 +162,7 @@ function startServices(self)
     for _,s in ipairs(SERVICES) do if not launch(s) then self.failures[s.exe]=1 end end
 end
 function supervise(self)
+    suppressRetiredCloudServer()
     for _,s in ipairs(SERVICES) do
         if not alive(s) then
             local n=(self.failures[s.exe] or 0)+1; self.failures[s.exe]=n

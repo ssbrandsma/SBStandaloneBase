@@ -30,5 +30,17 @@ $runner "$helper" inspect-superblock "$tmp/short.img" >/dev/null 2>&1
 status=$?
 set -e
 test "$status" = 65
+# Unsupported filesystem size must fail without leaving a usable image.
+set +e
+"$mkfs" -r "$tmp/root" -m 2048 -e 129024 -c 10 -x lzo -o "$tmp/too-small.img" >/dev/null 2>&1
+status=$?
+set -e
+test "$status" != 0
+# Repeated compact generation remains valid and bounded.
+rm -f "$tmp/test.img"
+"$mkfs" -r "$tmp/root" -m 2048 -e 129024 -c 521 -x lzo -o "$tmp/test.img"
+out=$($runner "$helper" inspect-superblock "$tmp/test.img")
+echo "$out" | grep -q '^leb_cnt=14$'
+echo "$out" | grep -q '^max_leb_cnt=521$'
 test -n "$expected"
 echo image-tests-ok

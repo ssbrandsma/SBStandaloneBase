@@ -85,7 +85,6 @@ virgin_layout_exact() {
         && test "$(value "$UBI/avail_eraseblocks")" = 660 \
         && stock_volume_set_exact \
         && test ! -e "$VOLUME" \
-        && test ! -e "$VOLUME_DEVICE" \
         && test -z "$(mounted_type "$MOUNT")" \
         && test -z "$(mounted_type "$SOURCE")"
 }
@@ -117,7 +116,9 @@ status_snapshot() {
     test -f "$ROOT/etc/init.d/rcS" && grep -q 'rcS.local' "$ROOT/etc/init.d/rcS" 2>/dev/null || base_supported=0
     state=UNAVAILABLE
     if test "$base_supported" != 1; then state=UNSUPPORTED
-    elif { test -e "$VOLUME" || test -e "$VOLUME_DEVICE"; } && ! exact_sbdata; then state=ERROR
+    # Sysfs is authoritative for UBI volume existence and identity. SqueezeOS
+    # may ship static /dev/ubi0_N nodes for volumes that do not exist yet.
+    elif test -e "$VOLUME" && ! exact_sbdata; then state=ERROR
     elif test "$bind_active" = 1 && test "$sbdata_mounted" = 1 && test "$driver_loaded" = 1; then state=ACTIVE
     elif test -f "$REBOOT_MARKER"; then state=REBOOT_REQUIRED
     elif exact_sbdata || virgin_layout_exact; then state=AVAILABLE
@@ -227,7 +228,7 @@ initialize() {
     test -z "$(mounted_type "$SOURCE")" || die 10 already_active
     test -z "$(mounted_type "$MOUNT")" || die 20 sbdata_already_mounted
 
-    if test -e "$VOLUME" || test -e "$VOLUME_DEVICE"; then
+    if test -e "$VOLUME"; then
         test -r "$VOLUME/name" || die 21 sbdata_unavailable
         test "$(value "$VOLUME/name")" = sbdata || die 21 sbdata_identity_mismatch
         test "$(value "$VOLUME/type")" = dynamic || die 20 sbdata_not_dynamic

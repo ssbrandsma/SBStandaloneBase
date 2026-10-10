@@ -29,6 +29,7 @@ REQUIRED = {
     "sbdata-empty.ubifs",
     "storage-setup.sh",
     "storage-boot.sh",
+    "patch-squeezeplay-artwork.sh",
 }
 EXECUTABLES = {
     "sbbase",
@@ -38,11 +39,13 @@ EXECUTABLES = {
     "sb-storage-updater",
     "storage-setup.sh",
     "storage-boot.sh",
+    "patch-squeezeplay-artwork.sh",
 }
-TARGETS = (
-    "/mnt/storage/usr/share/jive/applets/StandaloneBase",
-    "/usr/share/jive/applets/StandaloneBase",
-)
+# Install through the merged UnionFS path only. On SqueezeOS, /mnt/storage is
+# the writable branch beneath that union. Addressing /mnt/storage/usr through
+# the merged namespace can create /mnt/storage/mnt/storage/usr recursively and
+# consume the small UBIFS volume with a duplicate applet tree.
+TARGETS = ("/usr/share/jive/applets/StandaloneBase",)
 
 
 def arguments() -> argparse.Namespace:
@@ -226,6 +229,12 @@ def main() -> int:
             f"cp {qstage}/files/config.json /mnt/storage/standalonebase/config.json.new && "
             "chmod 644 /mnt/storage/standalonebase/config.json.new && "
             "mv /mnt/storage/standalonebase/config.json.new /mnt/storage/standalonebase/config.json"
+        )
+        # Patch before restart: SlimServer.lua is loaded early in SqueezePlay,
+        # before the StandaloneBase applet itself is initialized.
+        radio.run(
+            "/usr/share/jive/applets/StandaloneBase/patch-squeezeplay-artwork.sh "
+            "/usr/share/jive/jive/slim/SlimServer.lua"
         )
         if not args.no_restart:
             radio.run("/etc/init.d/squeezeplay restart")

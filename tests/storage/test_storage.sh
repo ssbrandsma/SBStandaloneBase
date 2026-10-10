@@ -25,6 +25,13 @@ printf '660\n' >"$fixture/sys/class/ubi/ubi0/avail_eraseblocks"
 printf '10\n' >"$fixture/sys/class/ubi/ubi0/reserved_for_bad"
 printf '0\n' >"$fixture/sys/class/ubi/ubi0/bad_peb_count"
 printf '0\n' >"$fixture/sys/class/ubi/ubi0/read_only"
+printf '2048\n' >"$fixture/sys/class/ubi/ubi0/min_io_size"
+printf '16384\n' >"$fixture/sys/class/ubi/ubi0/test_memory_available_kb"
+printf '8388608\n' >"$fixture/sys/class/ubi/ubi0/test_tmp_available_bytes"
+printf 'ok\n' >"$fixture/sys/class/ubi/ubi0/test_formatter_reason"
+printf '%s\n' 'f1ec2fb29c0a9e40a300283c191092905e0d6da40fcef32184dbfb5677653af3' >"$fixture/sys/class/ubi/ubi0/test_formatter_checksum"
+printf '1.3\n' >"$fixture/sys/class/ubi/ubi0/test_formatter_version"
+printf '/tmp/sb-mkfs-test/mkfs.ubifs\n' >"$fixture/sys/class/ubi/ubi0/test_formatter_path"
 printf '8178893\n' >"$fixture/sys/class/ubi/ubi0/test_fs_total_bytes"
 printf '5347738\n' >"$fixture/sys/class/ubi/ubi0/test_fs_free_bytes"
 touch "$fixture/dev/ubi0" "$fixture/usr/sbin/ubimkvol" "$fixture/mnt/storage/standalonebase/mkfs.ubifs"
@@ -34,7 +41,7 @@ reason(){ echo "$1" | grep -q "^prepare_reason=$2$"; }
 # Existing production layout without sbdata.
 out=$(run storage-status); echo "$out" | grep -q '^installation_state=absent$'
 out=$(run check); echo "$out" | grep -q '^compatible=true$'
-out=$(run prepare); echo "$out" | grep -q '^prepare_ready=true$'; echo "$out" | grep -q '^planned_volume=sbdata$'
+set +e; out=$(run prepare); s=$?; set -e; test "$s" = 2; reason "$out" migration_and_mount_safety_pending; echo "$out" | grep -q '^planned_volume=sbdata$'; echo "$out" | grep -q '^formatter_valid=true$'
 set +e; run install >/dev/null 2>&1; s=$?; set -e; test "$s" = 78
 set +e; run install >/dev/null 2>&1; s=$?; set -e; test "$s" = 78
 set +e; run resize-test-volume 8388608 token >/dev/null 2>&1; s=$?; set -e; test "$s" = 64
@@ -72,10 +79,21 @@ rm -rf "$fixture/usr/share/jive/applets/SetupAppletInstaller"
 set +e; out=$(run prepare); s=$?; set -e; test "$s" = 2; reason "$out" required_applets_missing
 mkdir "$fixture/usr/share/jive/applets/SetupAppletInstaller"
 
+# Formatter identity, resources, and exact geometry are mandatory.
+printf 'missing_executable\n' >"$fixture/sys/class/ubi/ubi0/test_formatter_reason"; : >"$fixture/sys/class/ubi/ubi0/test_formatter_path"
+set +e; out=$(run prepare); s=$?; set -e; test "$s" = 2; reason "$out" missing_compatible_mkfs_ubifs
+printf '/tmp/sb-mkfs-test/mkfs.ubifs\n' >"$fixture/sys/class/ubi/ubi0/test_formatter_path"
+for why in wrong_architecture_or_linkage wrong_checksum unsupported_version checksum_failed; do printf '%s\n' "$why" >"$fixture/sys/class/ubi/ubi0/test_formatter_reason"; set +e; out=$(run prepare); s=$?; set -e; test "$s" = 2; reason "$out" "formatter_$why"; done
+printf 'ok\n' >"$fixture/sys/class/ubi/ubi0/test_formatter_reason"
+printf '4096\n' >"$fixture/sys/class/ubi/ubi0/test_memory_available_kb"; set +e; out=$(run prepare); s=$?; set -e; test "$s" = 2; reason "$out" insufficient_free_ram; printf '16384\n' >"$fixture/sys/class/ubi/ubi0/test_memory_available_kb"
+printf '1048576\n' >"$fixture/sys/class/ubi/ubi0/test_tmp_available_bytes"; set +e; out=$(run prepare); s=$?; set -e; test "$s" = 2; reason "$out" insufficient_temporary_capacity; printf '8388608\n' >"$fixture/sys/class/ubi/ubi0/test_tmp_available_bytes"
+printf '4096\n' >"$fixture/sys/class/ubi/ubi0/min_io_size"; set +e; out=$(run prepare); s=$?; set -e; test "$s" = 2; reason "$out" invalid_min_io_size; printf '2048\n' >"$fixture/sys/class/ubi/ubi0/min_io_size"
+printf '131072\n' >"$fixture/sys/class/ubi/ubi0/ubi0_2/usable_eb_size"; set +e; out=$(run prepare); s=$?; set -e; test "$s" = 2; reason "$out" invalid_leb_size; printf '129024\n' >"$fixture/sys/class/ubi/ubi0/ubi0_2/usable_eb_size"
+
 # Correct sbdata, incomplete install, and then complete verified state.
 d="$fixture/sys/class/ubi/ubi0/ubi0_5"; mkdir "$d"; printf 'sbdata\n' >"$d/name"; printf 'dynamic\n' >"$d/type"; printf '0\n' >"$d/corrupted"; printf '521\n' >"$d/reserved_ebs"; printf '129024\n' >"$d/usable_eb_size"; touch "$fixture/dev/ubi0_5"
 printf '100\n' >"$fixture/sys/class/ubi/ubi0/avail_eraseblocks"
-out=$(run prepare); echo "$out" | grep -q '^prepare_ready=true$'
+set +e; out=$(run prepare); s=$?; set -e; test "$s" = 2; reason "$out" migration_and_mount_safety_pending
 rm "$fixture/dev/ubi0_5"
 set +e; out=$(run prepare); s=$?; set -e; test "$s" = 2; reason "$out" missing_sbdata_device_node
 touch "$fixture/dev/ubi0_5"

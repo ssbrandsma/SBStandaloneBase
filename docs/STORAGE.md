@@ -8,6 +8,8 @@ The active proposal is a separate dynamic UBI volume named exactly `sbdata`; see
 
 The historical builder in `tools/ubi` pins mtd-utils commit `bb56df1e1a84304ec4a14169e4cdc41116ed4256` (2009-06-05, mkfs.ubifs 1.3). Its offline image uses minimum I/O 2048, LEB size 129024, LZO, `w4/r0`, and `max_leb_cnt=521`. It is evidence for the proposed format, not authorization to write flash. Docker remains the canonical clean build; the checked artifact was produced by the equivalent pinned WSL build because Docker Desktop was unavailable.
 
+The static ARMv5 formatter was subsequently validated natively on the 7.7.3 Radio using RAM-only images. The compact 521-LEB profile materializes 14 LEBs (1,806,336 bytes) while retaining `max_leb_cnt=521`; see `SBDATA_NATIVE_MKFS_VALIDATION.md`. This does not authorize creating or updating a UBI volume.
+
 Mainline Linux 2.6.27 UBIFS growth is capped by `max_leb_cnt`. The Radio's 2.6.26.8-rt16 UBIFS is a vendor backport whose matching source has not been located. The inspected 9.0.1 production filesystem has `max_leb_cnt=82`, confirming that its original filesystem cannot simply consume a larger UBI allocation. These findings motivated the separate-volume design.
 
 Primary sources:

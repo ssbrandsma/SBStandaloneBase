@@ -27,3 +27,10 @@ The checked-in hashes are recorded in SHA256SUMS. The image is an offline
 candidate for the proposed sbdata profile; it is not approved for device use.
 The helper artifact is ARM EABI5, soft-float, statically linked, and stripped.
 It contains no UBI resize ioctl and its install command is hard-disabled.
+
+Native ARM formatter:
+  tools/ubi/build-arm-mkfs.sh
+  artifacts/ubi/mkfs.ubifs-20090605-armv5-static
+  static ARM EABI5 soft-float, 136472 bytes
+  SHA-256 f1ec2fb29c0a9e40a300283c191092905e0d6da40fcef32184dbfb5677653af3
+  physical RAM-only validation: docs/SBDATA_NATIVE_MKFS_VALIDATION.md
