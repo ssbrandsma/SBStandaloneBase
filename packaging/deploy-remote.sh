@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-version=0.2.6
-expected_sha=ec1a57751f7116a889704a0ff41816e1a1d083db
+version=0.3.0
+expected_sha=0d80daf9cff26f499f899f9bbe3e609dcbdf12a9
 stamp=$(date +%Y%m%d-%H%M%S)
 base_root=/var/www/web-account/data/www/example.invalid/sbstandalonebase
 merged_xml=/var/www/web-account/data/www/example.invalid/squeezebox/extensions.xml

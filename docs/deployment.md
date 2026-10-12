@@ -4,7 +4,7 @@ Build all ARM binaries, run host and QEMU checks, then create the ZIP. Publish n
 
 Installation copies the applet to `/usr/share/jive/applets/StandaloneBase`. On initialization it creates `/mnt/storage/standalonebase` and `/tmp/standalonebase`, starts the three services, migrates the configured bootstrap endpoint to the local service, and reports observed process state in **Standalone Base**.
 
-The packaged `config.json` provides an offline catalog containing Standalone Radio and Standalone Spotify. At startup the applet starts its loopback HTTPS proxy, retrieves `https://raw.githubusercontent.com/ssbrandsma/SBStandaloneBase/master/config.json`, validates that both expected applet identifiers are present, and atomically replaces `/mnt/storage/standalonebase/config.json`. If retrieval or validation fails, the last valid persistent file—or the packaged fallback on first boot—is retained. `sbbase` reads that file and returns its two entries for the Applet Installer `jiveapplets` request.
+The packaged `config.json` provides an offline catalog containing Standalone Radio, Spotify Connect, and Qobuz Connect. At startup the applet starts its loopback HTTPS proxy, retrieves `https://raw.githubusercontent.com/ssbrandsma/SBStandaloneBase/master/config.json`, validates the expected base catalog identifiers, and atomically replaces `/mnt/storage/standalonebase/config.json`. If retrieval or validation fails, the last valid persistent file—or the packaged fallback on first boot—is retained. `sbbase` reads that file and returns these entries for the Applet Installer `jiveapplets` request.
 
 On initialization, the applet migrates the former bootstrap endpoint `203.0.113.10` to the local endpoint `127.0.0.1` in the SqueezePlay server-selection settings. Before changing a file, it preserves its original contents once in a sibling `.pre-standalonebase` backup. The exact-address replacement is idempotent and does not modify other configured servers.
 
@@ -24,7 +24,7 @@ before the applet initializes.
 From the repository root on Windows:
 
 ```powershell
-.\deploy_dist.cmd .\dist\StandaloneBase-0.2.6.zip root@192.0.2.22 -p1234
+.\deploy_dist.cmd .\dist\StandaloneBase-0.3.0.zip root@192.0.2.22 -p1234
 ```
 
 The command validates that the archive is a flat StandaloneBase release ZIP,

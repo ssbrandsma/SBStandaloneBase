@@ -1,6 +1,15 @@
 # StandaloneBase
 
+The web interface includes an authenticated **Virtual Radio** at `/remote` for
+live LCD capture and remote operation through the real Jive action system. See
+[`docs/VIRTUAL_RADIO_IMPLEMENTATION.md`](docs/VIRTUAL_RADIO_IMPLEMENTATION.md).
+Photorealistic and Classic layouts, asset provenance, normalized geometry, and
+hotspot calibration are documented in
+[`docs/VIRTUAL_RADIO_PHOTOREALISTIC.md`](docs/VIRTUAL_RADIO_PHOTOREALISTIC.md).
+
 StandaloneBase is a three-process native runtime plus SqueezePlay applet for a Logitech Squeezebox Radio. It provides a minimal local LMS-compatible bootstrap (`sbbase`), the existing configuration web server (`sbwebserver`), and the existing loopback HTTPS compatibility proxy (`sbproxy`).
+
+Browser management uses physical six-digit PIN pairing and short-lived HttpOnly sessions; see [Web Access pairing](docs/WEB_ACCESS_PAIRING.md).
 
 This repository is an engineering baseline. Host protocol tests are automated. Local-LMS activation is intentionally not performed until the hardware checklist is approved and run on a recoverable Radio.
 

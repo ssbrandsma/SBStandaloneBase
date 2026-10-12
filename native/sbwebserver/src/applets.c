@@ -1,34 +1,79 @@
 #include "applets.h"
+#include <ctype.h>
+#include <dirent.h>
+#include <stdarg.h>
 #include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-#include <sys/stat.h>
 #include <stdlib.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <sys/types.h>
+#include <string.h>
+#include <sys/stat.h>
 
-#define MAX_STATIONS 128
-#define FIELD 512
-typedef struct { char name[FIELD], url[FIELD], logo[FIELD]; } Station;
-static const char *base(void) { const char *e=getenv("SBWEBSERVER_CONFIG_DIR");if(e&&*e)return e;if(access("/mnt/storage", W_OK) == 0)return "/mnt/storage/sbwebserver";return "/tmp/sbwebserver"; }
-static void file_path(char *p,size_t n,const char *f){snprintf(p,n,"%s/%s",base(),f);}
-static void ensure_dir(void){char p[128];snprintf(p,sizeof p,"%s",base());
-#ifdef _WIN32
-_mkdir(p);
-#else
-mkdir(p,0755);
-#endif
+#define APPLET_ROOT "/usr/share/jive/applets"
+#define APPLET_MAX 128
+#define APPLET_NAME_MAX 127
+
+typedef struct { char *p; size_t left; } Writer;
+
+static void add(Writer *w, const char *fmt, ...) {
+  va_list ap; int r; size_t used;
+  if (w->left < 2) return;
+  va_start(ap, fmt); r = vsnprintf(w->p, w->left, fmt, ap); va_end(ap);
+  if (r < 0) return;
+  used = (size_t)r;
+  if (used >= w->left) { w->p += w->left - 1; w->left = 1; }
+  else { w->p += used; w->left -= used; }
 }
-static int csv_field(const char **src,char *dst,size_t cap){size_t n=0;const char*p=*src;int quoted=(*p=='"');if(quoted)p++;while(*p){if(quoted&&*p=='"'){if(p[1]=='"'){if(n+1<cap)dst[n++]='"';p+=2;continue;}p++;while(*p==' '||*p=='\t')p++;if(*p==',')p++;else if(*p=='\r'||*p=='\n'||!*p){}else return -1;dst[n]=0;*src=p;return 0;}if(!quoted&&(*p==','||*p=='\r'||*p=='\n')){if(*p==',')p++;dst[n]=0;*src=p;return 0;}if(n+1>=cap)return -1;dst[n++]=*p++;}dst[n]=0;*src=p;return quoted?-1:0;}
-static int parse_csv(const char*data,Station*out,int*count){const char*p=data;int c=0;char h[FIELD];if(csv_field(&p,h,sizeof h)||strcmp(h,"name"))return -1;if(csv_field(&p,h,sizeof h)||strcmp(h,"stream_url"))return -1;if(csv_field(&p,h,sizeof h)||strcmp(h,"logo_url"))return -1;while(*p=='\r'||*p=='\n')p++;while(*p){Station s={{0},{0},{0}};if(c>=MAX_STATIONS)return -1;if(csv_field(&p,s.name,sizeof s.name)||csv_field(&p,s.url,sizeof s.url)||csv_field(&p,s.logo,sizeof s.logo))return -1;while(*p=='\r'||*p=='\n')p++;if(!s.name[0]||!s.url[0])return -1;out[c++]=s;}*count=c;return 0;}
-static int write_stations(Station*a,int count){char path[160],tmp[180];ensure_dir();file_path(path,sizeof path,"stations.csv");snprintf(tmp,sizeof tmp,"%s.tmp",path);FILE*f=fopen(tmp,"w");if(!f)return -1;fputs("name,stream_url,logo_url\n",f);for(int i=0;i<count;i++){const char*vals[]={a[i].name,a[i].url,a[i].logo};for(int j=0;j<3;j++){if(j)fputc(',',f);fputc('"',f);for(const char*q=vals[j];*q;q++){if(*q=='"')fputc('"',f);fputc(*q,f);}fputc('"',f);}fputc('\n',f);}fflush(f);
-#ifndef _WIN32
-fsync(fileno(f));
-#endif
-fclose(f);return rename(tmp,path);}
-void applets_json(char*out,size_t n){int a=access("/usr/share/jive/applets/StandaloneRadio",F_OK)==0||access("/usr/share/jive/applets/SBStandalone",F_OK)==0;snprintf(out,n,"[{\"id\":\"standalone-radio\",\"name\":\"Standalone Radio\",\"installed\":%s,\"supported\":true},{\"id\":\"https-proxy\",\"name\":\"HTTPS Proxy\",\"installed\":%s,\"supported\":false},{\"id\":\"spotify-connect\",\"name\":\"Spotify Connect\",\"installed\":%s,\"supported\":false}]",a?"true":"false",access("/usr/share/jive/applets/HTTPSProxy",F_OK)==0?"true":"false",access("/usr/share/jive/applets/SpotifyConnect",F_OK)==0?"true":"false");}
-void stations_json(char*out,size_t n){char p[160],line[2048];file_path(p,sizeof p,"stations.csv");FILE*f=fopen(p,"r");Station items[MAX_STATIONS];int count=0;if(f){fgets(line,sizeof line,f);while(fgets(line,sizeof line,f)&&count<MAX_STATIONS){Station s;const char*q=line;if(csv_field(&q,s.name,sizeof s.name)||csv_field(&q,s.url,sizeof s.url)||csv_field(&q,s.logo,sizeof s.logo))continue;items[count++]=s;}fclose(f);}size_t u=snprintf(out,n,"[");for(int i=0;i<count&&u<n;i++)u+=snprintf(out+u,n-u,"%s{\"name\":\"%s\",\"stream_url\":\"%s\",\"logo_url\":\"%s\"}",i?",":"",items[i].name,items[i].url,items[i].logo);snprintf(out+(u<n?u:n-1),u<n?n-u:1,"]");}
-int stations_put(const char*body){Station a[MAX_STATIONS];int count=0;if(!body||parse_csv(body,a,&count))return -1;return write_stations(a,count);}
-int stations_csv(char*out,size_t n){char p[160];file_path(p,sizeof p,"stations.csv");FILE*f=fopen(p,"r");if(!f){snprintf(out,n,"name,stream_url,logo_url\n");return 0;}size_t u=0;int ch;while((ch=fgetc(f))!=EOF&&u+1<n)out[u++]=(char)ch;out[u]=0;fclose(f);return 0;}
-int stations_import(const char*body,size_t len){if(!body||!len||len>256*1024)return -1;char*copy=malloc(len+1);if(!copy)return -1;memcpy(copy,body,len);copy[len]=0;Station a[MAX_STATIONS];int count=0;int rc=parse_csv(copy,a,&count);free(copy);return rc?-1:write_stations(a,count);}
+
+static void json_string(Writer *w, const char *s) {
+  add(w, "\"");
+  for (; *s; s++) {
+    unsigned char c = (unsigned char)*s;
+    if (c == '\"' || c == '\\') add(w, "\\%c", c);
+    else if (c >= 32) add(w, "%c", c);
+  }
+  add(w, "\"");
+}
+
+static int compare_names(const void *a, const void *b) {
+  return strcmp((const char *)a, (const char *)b);
+}
+
+static void applet_id(const char *name, char *out, size_t n) {
+  size_t used = 0; int separator = 0;
+  while (*name && used + 1 < n) {
+    unsigned char c = (unsigned char)*name++;
+    if (isalnum(c)) {
+      if (separator && used && used + 1 < n) out[used++] = '-';
+      out[used++] = (char)tolower(c); separator = 0;
+    } else separator = 1;
+  }
+  out[used] = 0;
+}
+
+void applets_json(char *out, size_t n) {
+  char names[APPLET_MAX][APPLET_NAME_MAX + 1];
+  size_t count = 0; DIR *dir = opendir(APPLET_ROOT); struct dirent *entry;
+  Writer w = {out, n};
+  if (dir) {
+    while (count < APPLET_MAX && (entry = readdir(dir)) != NULL) {
+      char path[512], meta[1024]; struct stat st; size_t name_len = strlen(entry->d_name);
+      if (entry->d_name[0] == '.' || name_len > APPLET_NAME_MAX) continue;
+      snprintf(path, sizeof path, "%s/%s", APPLET_ROOT, entry->d_name);
+      if (stat(path, &st) || !S_ISDIR(st.st_mode)) continue;
+      snprintf(meta, sizeof meta, "%s/%sMeta.lua", path, entry->d_name);
+      if (stat(meta, &st) || !S_ISREG(st.st_mode)) continue;
+      memcpy(names[count], entry->d_name, name_len + 1); count++;
+    }
+    closedir(dir);
+  }
+  qsort(names, count, sizeof names[0], compare_names);
+  add(&w, "[");
+  for (size_t i = 0; i < count; i++) {
+    char id[APPLET_NAME_MAX * 2 + 1];
+    if (strcmp(names[i], "StandaloneRadio") == 0) snprintf(id, sizeof id, "standalone-radio");
+    else applet_id(names[i], id, sizeof id);
+    add(&w, "%s{\"id\":", i ? "," : ""); json_string(&w, id);
+    add(&w, ",\"name\":"); json_string(&w, names[i]);
+    add(&w, ",\"installed\":true,\"supported\":%s}", strcmp(names[i], "StandaloneRadio") == 0 ? "true" : "false");
+  }
+  add(&w, "]");
+}

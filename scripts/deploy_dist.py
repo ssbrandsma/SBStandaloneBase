@@ -10,10 +10,14 @@ import re
 import shlex
 import sys
 import time
+import warnings
 import zipfile
 from pathlib import Path
 
 try:
+    from cryptography.utils import CryptographyDeprecationWarning
+
+    warnings.filterwarnings("ignore", category=CryptographyDeprecationWarning)
     import paramiko
 except ImportError:
     sys.stderr.write("deploy_dist requires Paramiko: python -m pip install paramiko\n")
@@ -132,18 +136,33 @@ class Radio:
 
     def run(self, command: str, attempts: int = 3) -> str:
         last: Exception | None = None
+        marker = "__STANDALONEBASE_DEPLOY_RC="
         for attempt in range(attempts):
             try:
                 if not self.client.get_transport() or not self.client.get_transport().is_active():
                     self.client.close()
                     self.client = self._new_client()
                     self.connect()
-                _, stdout, stderr = self.client.exec_command(command)
+                # A newline terminates either a normal command or a trailing
+                # background '&'. Adding ';' here formed invalid '&;' syntax
+                # on BusyBox ash for the scheduled SqueezePlay restart.
+                wrapped = (
+                    "{\n" + command + "\n}\n"
+                    "sb_deploy_rc=$?\n"
+                    "printf '\\n" + marker + "%s\\n' \"$sb_deploy_rc\""
+                )
+                _, stdout, stderr = self.client.exec_command(wrapped)
                 output, error = stdout.read().decode(errors="replace"), stderr.read().decode(errors="replace")
                 status = stdout.channel.recv_exit_status()
+                if marker in output:
+                    body, result = output.rsplit(marker, 1)
+                    remote_status = int(result.strip().splitlines()[0])
+                    if remote_status:
+                        raise RuntimeError(f"remote command failed ({remote_status}): {error or body}")
+                    return body.rstrip("\r\n")
                 if status:
                     raise RuntimeError(f"remote command failed ({status}): {error or output}")
-                return output
+                raise RuntimeError("remote command ended without a completion marker")
             except Exception as exc:  # Dropbear occasionally closes a session.
                 last = exc
                 self.client.close()
@@ -237,7 +256,20 @@ def main() -> int:
             "/usr/share/jive/jive/slim/SlimServer.lua"
         )
         if not args.no_restart:
-            radio.run("/etc/init.d/squeezeplay restart")
+            # The native services outlive SqueezePlay, so stop only the PIDs
+            # whose command lines match this applet before restarting Jive.
+            # Schedule this after the SSH command returns because old Dropbear
+            # otherwise closes the channel without reporting an exit status.
+            radio.run(
+                "nohup sh -c 'sleep 1; "
+                "for n in sbproxy sbbase sbwebserver; do "
+                "p=/tmp/standalonebase/$n.pid; pid=$(cat \"$p\" 2>/dev/null); "
+                "if test -n \"$pid\" && test -r /proc/$pid/cmdline && "
+                "grep -q \"^/usr/share/jive/applets/StandaloneBase/$n\" /proc/$pid/cmdline; "
+                "then kill \"$pid\"; fi; rm -f \"$p\"; done; "
+                "/etc/init.d/squeezeplay restart' "
+                ">/tmp/standalonebase/jive-restart.log 2>&1 </dev/null &"
+            )
         print(f"Deployed StandaloneBase {version} to {user}@{host}.")
         print("SqueezePlay restart skipped." if args.no_restart else "SqueezePlay restarted; no radio reboot is required.")
         return 0

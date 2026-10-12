@@ -77,19 +77,12 @@ for manual rollback unless explicitly removed.
 
 ## Management security
 
-Read APIs and package downloads are public on the existing web interface.
-PUT, DELETE and upload require `X-Management-Token` (or a Bearer token), reject
-foreign `Origin` values, reject state-changing GETs, and honor read-only mode.
-On first start, 32 random bytes are saved with mode 0600 at:
-
-```text
-/mnt/storage/standalonebase/management.token
-```
-
-The browser keeps the entered token in `sessionStorage`. It is not placed in a
-URL or logged. `SBWEBSERVER_TOKEN` supplies a deterministic token for tests.
-The port-80 management service is still a LAN service; protect the LAN and do
-not forward it from a router.
+Read APIs, package downloads, PUT, DELETE and uploads require a valid
+PIN-paired `sb_session` browser cookie. Writes reject foreign `Origin` values,
+reject state-changing GETs, and honor read-only mode. The cookie is HttpOnly,
+SameSite=Strict and never exposed to frontend JavaScript. The retired legacy
+management token is not accepted. The port-80 management service is still a
+LAN service; protect the LAN and do not forward it from a router.
 
 ## Management API
 
@@ -109,12 +102,8 @@ Radio. It does not modify UBI geometry, but it writes to initialized `sbdata`.
 1. Verify Extended Storage reports Active, then install the candidate package.
 2. On a PC open `http://RADIO-IP/`, select **Applets**, and confirm existing
    Standalone Radio and Spotify entries remain external entries.
-3. Obtain the token over SSH:
-
-   ```sh
-   cat /mnt/storage/standalonebase/management.token
-   ```
-
+3. On the physical Radio open **Standalone Base → Web Access → Show Pairing
+   Code**, then enter the displayed code in the browser.
 4. Upload a known newer Standalone Radio test ZIP and confirm its metadata,
    local source badge and computed SHA-1. This makes it available; it does not
    install it.

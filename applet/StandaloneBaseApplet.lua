@@ -9,6 +9,7 @@ local SlimServer = require("jive.slim.SlimServer")
 local StorageManager = require("applets.StandaloneBase.StorageManager")
 local ExtendedStorageState = require("applets.StandaloneBase.ExtendedStorageState")
 local TimeSync = require("applets.StandaloneBase.TimeSync")
+local RemoteBridge = require("applets.StandaloneBase.RemoteBridge")
 local io, os, tonumber, tostring = io, os, tonumber, tostring
 local ipairs, pairs, math, pcall = ipairs, pairs, math, pcall
 local appletManager = appletManager
@@ -137,7 +138,8 @@ local function refreshConfig()
         local c=io.open(tmp,"r")
         local body=c and c:read("*a") or ""
         if c then c:close() end
-        if body:find('"StandaloneRadio"',1,true) and body:find('"SpotifyConnect"',1,true) then
+        if body:find('"StandaloneRadio"',1,true) and body:find('"SpotifyConnect"',1,true)
+            and body:find('"QobuzConnect"',1,true) then
             os.rename(tmp,CONFIG)
             return
         end
@@ -156,6 +158,7 @@ function init(self)
     refreshConfig()
     for i=2,#SERVICES do if not launch(SERVICES[i]) then self.failures[SERVICES[i].exe]=1 end end
     self.timeSync=TimeSync.new(); self.timeSync:start()
+    self.remoteBridge=RemoteBridge(); self.remoteBridge:init()
     self.monitor=Timer(15000,function() self:supervise() end); self.monitor:start()
 end
 function startServices(self)
@@ -178,7 +181,61 @@ function menu(self)
     local menu=SimpleMenu("menu")
     for _,s in ipairs(SERVICES) do menu:addItem({text=s.name..": "..(alive(s) and "Running" or "Stopped")}) end
     menu:addItem({text="Extended Storage",callback=function() self:storageMenu() end})
-    menu:addItem({text="Version: 0.2.6"})
+    menu:addItem({text="Web Access",callback=function() if not self.remoteBridge:isInjecting() then self:webAccessMenu() end end})
+    menu:addItem({text="Version: 0.3.0"})
+    window:addWidget(menu); window:show()
+end
+function webAccessMenu(self)
+    local window=Window("text_list","Web Access")
+    local menu=SimpleMenu("menu")
+    menu:setHeaderWidget(Textarea("help_text","Pair a browser without SSH. Pairing actions must be selected on the physical Radio."))
+    menu:addItem({text="Show Pairing Code",callback=function() if not self.remoteBridge:isInjecting() then self:showPairingCode(window) end end})
+    menu:addItem({text="Revoke All Web Sessions",callback=function() if not self.remoteBridge:isInjecting() then self:confirmWebRevoke(window) end end})
+    window:addWidget(menu); window:show()
+end
+function showPairingCode(self,previous)
+    self.remoteBridge:webAccess("start",function(data,err)
+        if err or not data then self:webAccessError(previous,"Could not create a pairing code."); return end
+        local pin=data:match('"pin"%s*:%s*"(%d%d%d%d%d%d)"')
+        local seconds=tonumber(data:match('"expiresIn"%s*:%s*(%d+)')) or 120
+        if not pin then self:webAccessError(previous,"The pairing service returned an invalid response."); return end
+        if previous then previous:hide() end
+        local window=Window("text_list","Web Access")
+        window:setAllowScreensaver(false)
+        local menu=SimpleMenu("menu")
+        menu:setHeaderWidget(Textarea("help_text","Enter this code in the Standalone Base web page. Remote screen capture is disabled while the code is active."))
+        local pinItem={text="Pairing code: "..pin:sub(1,3).." "..pin:sub(4,6),style="item_info"}
+        local expiresItem={text="Expires in 02:00",style="item_info"}
+        menu:addItem(pinItem); menu:addItem(expiresItem)
+        local remaining=seconds
+        local timer
+        timer=Timer(1000,function()
+            remaining=remaining-1
+            if remaining<=0 then timer:stop(); menu:setText(expiresItem,"Code expired")
+            else menu:setText(expiresItem,string.format("Expires in %02d:%02d",math.floor(remaining/60),remaining%60)) end
+        end); timer:start()
+        menu:addItem({text="Cancel Pairing",callback=function() timer:stop(); self.remoteBridge:webAccess("cancel",function() end); window:hide() end})
+        window:addWidget(menu); window:show()
+    end)
+end
+function confirmWebRevoke(self,previous)
+    local window=Window("text_list","Revoke Web Sessions?")
+    local menu=SimpleMenu("menu")
+    menu:setHeaderWidget(Textarea("help_text","Every paired browser will be logged out immediately."))
+    menu:addItem({text="Cancel",callback=function() window:hide() end})
+    menu:addItem({text="Revoke All",callback=function()
+        if self.remoteBridge:isInjecting() then return end
+        self.remoteBridge:webAccess("revoke-all",function(data,err)
+            window:hide(); if err or not data then self:webAccessError(previous,"Session revocation failed.") else self:webAccessError(previous,"All web sessions were revoked.") end
+        end)
+    end})
+    window:addWidget(menu); window:show()
+end
+function webAccessError(self,previous,message)
+    if previous then previous:hide() end
+    local window=Window("text_list","Web Access")
+    local menu=SimpleMenu("menu"); menu:setHeaderWidget(Textarea("help_text",message))
+    menu:addItem({text="Close",callback=function() window:hide() end})
     window:addWidget(menu); window:show()
 end
 function storageMenu(self)
@@ -259,6 +316,7 @@ function verifyStandaloneStorage(self) return storage:verifyStorage() end
 function free(self)
     if self.monitor then self.monitor:stop() end
     if self.timeSync then self.timeSync:stop(); self.timeSync=nil end
+    if self.remoteBridge then self.remoteBridge:stop(); self.remoteBridge=nil end
     storage:stop()
     for _,t in pairs(self.backoff or {}) do t:stop() end
     for i=#SERVICES,1,-1 do stop(SERVICES[i]) end

@@ -1,6 +1,6 @@
 {
   "catalog_version": "1",
-  "standalone_base_version": "0.2.6",
+  "standalone_base_version": "0.3.0",
   "server": {
     "name": "Standalone Base",
     "uuid": "9d989f40-499a-4b85-b92f-8dc415af2a04",
@@ -15,26 +15,39 @@
     {
       "name": "StandaloneRadio",
       "title": "Standalone Radio",
-      "version": "0.9.1",
+      "version": "0.9.3",
       "target": "baby",
       "min_target_version": "7.7",
-      "url": "http://203.0.113.10/sbstandalone/StandaloneRadio-0.9.1.zip",
-      "sha": "57f55dee91695b9eb8a19955b87aa806c75753a3",
+      "url": "http://203.0.113.10/sbstandalone/StandaloneRadio-0.9.3.zip",
+      "sha": "969153794cd235e070019e18927f5ca4155d43b4",
       "desc": "Standalone internet radio playback for Logitech Squeezebox Radio.",
-      "changes": "Fix HTTPS Proxy health detection on stock SqueezePlay.",
+      "changes": "Add user-defined stations managed by Standalone Base.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     },
     {
       "name": "SpotifyConnect",
-      "title": "Standalone Spotify",
-      "version": "0.5.4",
+      "title": "Spotify Connect",
+      "version": "0.6.2",
       "target": "baby",
       "min_target_version": "7.7",
-      "url": "http://203.0.113.10/sbspotifyconnect/SpotifyConnect-0.5.4.zip",
-      "sha": "7ba64e938f67c982e8970a9b04a06615b2a2a5a8",
+      "url": "http://203.0.113.10/sbspotifyconnect/SpotifyConnect-0.6.2.zip",
+      "sha": "d6edaa67a6e6affaf61e96732a34a9877dcb11ae",
       "desc": "Standalone Spotify Connect playback for Logitech Squeezebox Radio.",
-      "changes": "Fix playback across natural track boundaries and rapid Spotify track changes.",
+      "changes": "Add Disabled, Manual, and Always On Spotify service lifecycle modes with safe recovery.",
+      "creator": "Sjoerd Brandsma",
+      "email": ""
+    },
+    {
+      "name": "QobuzConnect",
+      "title": "Qobuz Connect",
+      "version": "0.1.2",
+      "target": "baby",
+      "min_target_version": "7.7.3",
+      "url": "http://203.0.113.10/sbqobuzconnect/QobuzConnect-0.1.2.zip",
+      "sha": "f1f24a4e377e6b6ee3e95d82b0c536a23f6e7b1e",
+      "desc": "Qobuz Connect playback for Logitech Squeezebox Radio. Requires StandaloneBase.",
+      "changes": "Add Disabled, Manual and Always On lifecycle modes with safe supervision and detailed status.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     }
