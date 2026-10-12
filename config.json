@@ -1,6 +1,6 @@
 {
   "catalog_version": "1",
-  "standalone_base_version": "0.3.0",
+  "standalone_base_version": "0.3.1",
   "server": {
     "name": "Standalone Base",
     "uuid": "9d989f40-499a-4b85-b92f-8dc415af2a04",

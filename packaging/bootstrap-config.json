@@ -1,0 +1,29 @@
+{
+  "server": {
+    "name": "Squeezebox Bootstrap",
+    "uuid": "11111111-2222-4333-8444-555555555555",
+    "host": "0.0.0.0",
+    "advertise_ip": "203.0.113.10",
+    "http_port": 9000,
+    "slimproto_port": 3483,
+    "discovery_port": 3483,
+    "version": "7.999.999",
+    "debug_protocol": false,
+    "public_catalog_mode": false
+  },
+  "applets": [
+    {
+      "name": "StandaloneBase",
+      "title": "Standalone Base",
+      "version": "0.3.1",
+      "target": "baby",
+      "min_target_version": "7.7.3",
+      "url": "http://203.0.113.10/sbstandalonebase/StandaloneBase-0.3.1.zip",
+      "sha": "175849820388fbc98d3bd36a4b55e16b0932c697",
+      "desc": "Local LMS-compatible infrastructure services for Squeezebox Radio.",
+      "changes": "Reliably migrate LMS 9.1 firmware from the bootstrap server to the local LMS.",
+      "creator": "Sjoerd Brandsma",
+      "email": ""
+    }
+  ]
+}

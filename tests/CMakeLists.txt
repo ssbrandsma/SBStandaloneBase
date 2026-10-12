@@ -20,6 +20,9 @@ if(LUA_EXECUTABLE)
   add_test(NAME extended_storage_lua_state COMMAND ${LUA_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/storage/test_extended_storage_state.lua
     ${CMAKE_SOURCE_DIR}/applet)
+  add_test(NAME server_migration_lua COMMAND ${LUA_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/comet/test_server_migration.lua
+    ${CMAKE_SOURCE_DIR})
 endif()
 add_test(NAME storage_updater COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/storage/test_updater.sh $<TARGET_FILE:sb-storage-updater>)
 add_executable(test_remote_framebuffer remote/test_framebuffer.c ../native/sbwebserver/src/remote_framebuffer.c)

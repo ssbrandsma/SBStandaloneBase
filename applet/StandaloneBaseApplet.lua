@@ -10,8 +10,9 @@ local StorageManager = require("applets.StandaloneBase.StorageManager")
 local ExtendedStorageState = require("applets.StandaloneBase.ExtendedStorageState")
 local TimeSync = require("applets.StandaloneBase.TimeSync")
 local RemoteBridge = require("applets.StandaloneBase.RemoteBridge")
+local ServerMigration = require("applets.StandaloneBase.ServerMigration")
 local io, os, tonumber, tostring = io, os, tonumber, tostring
-local ipairs, pairs, math, pcall = ipairs, pairs, math, pcall
+local ipairs, pairs, math, pcall, string = ipairs, pairs, math, pcall, string
 local appletManager = appletManager
 module(..., Framework.constants)
 oo.class(_M, Applet)
@@ -27,9 +28,6 @@ local SERVICES = {
 }
 local started = false
 local storage = StorageManager:new(ROOT)
-local BOOTSTRAP_IP_PATTERN = "49%.12%.198%.91"
-local LOCAL_IP = "127.0.0.1"
-local SERVER_UUID = "9d989f40-499a-4b85-b92f-8dc415af2a04"
 local SETTINGS_DIR = "/etc/squeezeplay/userpath/settings"
 local SERVER_SETTINGS = {
     "ChooseMusicSource.lua",
@@ -74,16 +72,8 @@ local function redirectBootstrapServer()
         local f=io.open(path,"r")
         if f then
             local original=f:read("*a"); f:close()
-            local updated,n=original:gsub(BOOTSTRAP_IP_PATTERN,LOCAL_IP)
-            if name == "ChooseMusicSource.lua" then
-                local normalized,m=updated:gsub('poll%s*=%s*%b{}','poll={["127.0.0.1"]="127.0.0.1",}')
-                updated,n=normalized,n+m
-            end
-            if original:find(SERVER_UUID,1,true) or original:find('serverName="StandaloneBase"',1,true) then
-                local normalized,m=updated:gsub('(serverInit%s*=%s*{%s*ip%s*=%s*)"[^"]+"','%1"'..LOCAL_IP..'"')
-                updated,n=normalized,n+m
-            end
-            if n > 0 then
+            local updated,changed=ServerMigration.migrateSettingsText(name,original)
+            if changed then
                 local backup=path..".pre-standalonebase"
                 local b=io.open(backup,"r")
                 if b then b:close() else
@@ -99,6 +89,39 @@ local function redirectBootstrapServer()
             end
         end
     end
+end
+
+local function redirectLiveBootstrapServer()
+    local ok,choose=pcall(function() return appletManager:loadApplet("ChooseMusicSource") end)
+    local chooseSettings=ok and choose and choose:getSettings() or nil
+    local okDiscovery,discovery=pcall(function() return appletManager:loadApplet("SlimDiscovery") end)
+    local discoverySettings=okDiscovery and discovery and discovery:getSettings() or nil
+    local changedChoose,changedDiscovery=ServerMigration.migrateLiveSettings(chooseSettings,discoverySettings)
+    if changedChoose then
+        pcall(function()
+            appletManager:callService("setPollList",chooseSettings.poll)
+            choose:storeSettings()
+        end)
+    end
+    if changedDiscovery then pcall(function() discovery:storeSettings() end) end
+    return changedChoose or changedDiscovery
+end
+
+local function connectToLocalServer()
+    local localServer
+    for _,server in SlimServer:iterate() do
+        if server.id == ServerMigration.LOCAL_UUID then localServer=server; break end
+    end
+    if not localServer then return false end
+    pcall(function() localServer:connect() end)
+    local ok,player=pcall(function() return appletManager:callService("getCurrentPlayer") end)
+    if not ok or not player then return false end
+    local current=player:getSlimServer()
+    if current ~= localServer and current
+        and (current.id == ServerMigration.BOOTSTRAP_UUID or current:getName() == ServerMigration.BOOTSTRAP_NAME) then
+        return pcall(function() player:connectToServer(localServer) end)
+    end
+    return current == localServer
 end
 
 local function pidPath(s) return RUN.."/"..s.exe..".pid" end
@@ -159,6 +182,7 @@ function init(self)
     for i=2,#SERVICES do if not launch(SERVICES[i]) then self.failures[SERVICES[i].exe]=1 end end
     self.timeSync=TimeSync.new(); self.timeSync:start()
     self.remoteBridge=RemoteBridge(); self.remoteBridge:init()
+    redirectLiveBootstrapServer()
     self.monitor=Timer(15000,function() self:supervise() end); self.monitor:start()
 end
 function startServices(self)
@@ -166,6 +190,8 @@ function startServices(self)
 end
 function supervise(self)
     suppressRetiredCloudServer()
+    redirectLiveBootstrapServer()
+    connectToLocalServer()
     for _,s in ipairs(SERVICES) do
         if not alive(s) then
             local n=(self.failures[s.exe] or 0)+1; self.failures[s.exe]=n
@@ -182,7 +208,7 @@ function menu(self)
     for _,s in ipairs(SERVICES) do menu:addItem({text=s.name..": "..(alive(s) and "Running" or "Stopped")}) end
     menu:addItem({text="Extended Storage",callback=function() self:storageMenu() end})
     menu:addItem({text="Web Access",callback=function() if not self.remoteBridge:isInjecting() then self:webAccessMenu() end end})
-    menu:addItem({text="Version: 0.3.0"})
+    menu:addItem({text="Version: 0.3.1"})
     window:addWidget(menu); window:show()
 end
 function webAccessMenu(self)

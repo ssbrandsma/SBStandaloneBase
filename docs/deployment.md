@@ -6,7 +6,9 @@ Installation copies the applet to `/usr/share/jive/applets/StandaloneBase`. On i
 
 The packaged `config.json` provides an offline catalog containing Standalone Radio, Spotify Connect, and Qobuz Connect. At startup the applet starts its loopback HTTPS proxy, retrieves `https://raw.githubusercontent.com/ssbrandsma/SBStandaloneBase/master/config.json`, validates the expected base catalog identifiers, and atomically replaces `/mnt/storage/standalonebase/config.json`. If retrieval or validation fails, the last valid persistent file—or the packaged fallback on first boot—is retained. `sbbase` reads that file and returns these entries for the Applet Installer `jiveapplets` request.
 
-On initialization, the applet migrates the former bootstrap endpoint `203.0.113.10` to the local endpoint `127.0.0.1` in the SqueezePlay server-selection settings. Before changing a file, it preserves its original contents once in a sibling `.pre-standalonebase` backup. The exact-address replacement is idempotent and does not modify other configured servers.
+On initialization, the applet migrates the former bootstrap endpoint `203.0.113.10` to the local endpoint `127.0.0.1` in the SqueezePlay server-selection settings. It also replaces the bootstrap server UUID and name with the Standalone Base identity. Before changing a file, it preserves its original contents once in a sibling `.pre-standalonebase` backup. The exact-address replacement is idempotent and does not modify other configured servers.
+
+SqueezePlay 9.x loads applet settings before third-party applets initialize and can otherwise save the stale bootstrap address over the migrated file. Standalone Base therefore also migrates the live `ChooseMusicSource` and `SlimDiscovery` settings, updates the active discovery poll list, and waits for the correctly identified loopback server before switching a player that is still attached to the bootstrap server. This compatibility path never switches a player away from an unrelated LMS selection.
 
 StandaloneBase also runs `patch-squeezeplay-artwork.sh` against the active
 `/usr/share/jive/jive/slim/SlimServer.lua`. It first treats explicit native
@@ -24,7 +26,7 @@ before the applet initializes.
 From the repository root on Windows:
 
 ```powershell
-.\deploy_dist.cmd .\dist\StandaloneBase-0.3.0.zip root@192.0.2.22 -p1234
+.\deploy_dist.cmd .\dist\StandaloneBase-0.3.1.zip root@192.0.2.22 -p1234
 ```
 
 The command validates that the archive is a flat StandaloneBase release ZIP,

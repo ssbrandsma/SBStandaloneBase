@@ -10,10 +10,10 @@ test "$(sha256sum "$module" | awk '{print $1}')" = "$expected_sha" || { echo "in
 test "$(wc -c <"$image" | tr -d ' ')" = 1806336 || { echo "incorrect sbdata image size" >&2; exit 1; }
 test "$(sha256sum "$image" | awk '{print $1}')" = "$expected_image_sha" || { echo "incorrect sbdata image SHA-256" >&2; exit 1; }
 stage="$root/build-package/StandaloneBase"
-zipfile="$root/build-package/StandaloneBase-0.3.0.zip"
+zipfile="$root/build-package/StandaloneBase-0.3.1.zip"
 rm -rf "$stage"
 mkdir -p "$stage"
-cp "$root/applet/StandaloneBaseMeta.lua" "$root/applet/StandaloneBaseApplet.lua" "$root/applet/StorageManager.lua" "$root/applet/ExtendedStorageState.lua" "$root/applet/TimeSync.lua" "$root/applet/TimeResolver.lua" "$root/applet/RemoteBridge.lua" "$root/applet/strings.txt" "$stage/"
+cp "$root/applet/StandaloneBaseMeta.lua" "$root/applet/StandaloneBaseApplet.lua" "$root/applet/StorageManager.lua" "$root/applet/ExtendedStorageState.lua" "$root/applet/TimeSync.lua" "$root/applet/TimeResolver.lua" "$root/applet/RemoteBridge.lua" "$root/applet/ServerMigration.lua" "$root/applet/strings.txt" "$stage/"
 cp "$root/build-arm/sbbase" "$root/build-arm/sbwebserver" "$root/build-arm/sbproxy" "$root/build-arm/sb-storage-helper" "$root/build-arm/sb-storage-updater" "$stage/"
 cp "$root/scripts/storage-setup.sh" "$root/scripts/storage-boot.sh" "$stage/"
 cp "$root/scripts/patch-squeezeplay-artwork.sh" "$stage/"

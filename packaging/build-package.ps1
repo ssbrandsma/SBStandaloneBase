@@ -5,7 +5,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path $PSScriptRoot -Parent
-$Version = '0.3.0'
+$Version = '0.3.1'
 $ModuleSize = 199119
 $ModuleSha256 = '63652ce67df06a78abb84a4986253bdab02fbd7b7c000779c60b3d393ba9566b'
 $ImageSize = 1806336
@@ -22,6 +22,7 @@ $Files = [ordered]@{
     'TimeSync.lua'              = (Join-Path $Root 'applet/TimeSync.lua')
     'TimeResolver.lua'          = (Join-Path $Root 'applet/TimeResolver.lua')
     'RemoteBridge.lua'          = (Join-Path $Root 'applet/RemoteBridge.lua')
+    'ServerMigration.lua'       = (Join-Path $Root 'applet/ServerMigration.lua')
     'sbbase'                    = (Join-Path $Root 'build-arm/sbbase')
     'sbwebserver'               = (Join-Path $Root 'build-arm/sbwebserver')
     'sbproxy'                   = (Join-Path $Root 'build-arm/sbproxy')
@@ -89,7 +90,7 @@ $Url = $BaseUrl.TrimEnd('/') + '/' + [IO.Path]::GetFileName($ZipPath)
 $Xml = @"
 <?xml version="1.0" encoding="UTF-8"?>
 <extensions><details><title lang="EN">StandaloneBase Applet Repository</title></details><applets>
-<applet name="StandaloneBase" version="$Version" target="baby" minTarget="7.7.3" maxTarget="*"><title lang="EN">Standalone Base</title><desc lang="EN">Local LMS-compatible infrastructure services for Squeezebox Radio.</desc><changes lang="EN">Add physical PIN web access, Virtual Radio, managed stations, and consolidated system overview.</changes><creator>Sjoerd Brandsma</creator><url>$Url</url><sha>$Sha1</sha></applet>
+<applet name="StandaloneBase" version="$Version" target="baby" minTarget="7.7.3" maxTarget="*"><title lang="EN">Standalone Base</title><desc lang="EN">Local LMS-compatible infrastructure services for Squeezebox Radio.</desc><changes lang="EN">Reliably migrate LMS 9.1 firmware from the bootstrap server to the local LMS.</changes><creator>Sjoerd Brandsma</creator><url>$Url</url><sha>$Sha1</sha></applet>
 </applets></extensions>
 "@
 $Utf8 = New-Object Text.UTF8Encoding($false)
