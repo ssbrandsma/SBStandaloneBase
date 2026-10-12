@@ -4,6 +4,8 @@
 /dist/
 /.downloads/
 /build-np/
+/build-*/
+/build-*.png
 /screenshots/
 __pycache__/
 *.log
