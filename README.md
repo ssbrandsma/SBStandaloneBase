@@ -11,6 +11,11 @@ StandaloneBase is a three-process native runtime plus SqueezePlay applet for a L
 
 Browser management uses physical six-digit PIN pairing and short-lived HttpOnly sessions; see [Web Access pairing](docs/WEB_ACCESS_PAIRING.md).
 
+The authenticated web interface also provides read-only live system logs and a
+stateless System Performance/process monitor. See
+[`docs/SYSTEM_LOG_VIEWER.md`](docs/SYSTEM_LOG_VIEWER.md) and
+[`docs/PROCESS_MONITOR_IMPLEMENTATION.md`](docs/PROCESS_MONITOR_IMPLEMENTATION.md).
+
 This repository is an engineering baseline. Host protocol tests are automated. Local-LMS activation is intentionally not performed until the hardware checklist is approved and run on a recoverable Radio.
 
 ## Build and test
@@ -30,3 +35,24 @@ See `docs/deployment.md`, `docs/recovery.md`, and `docs/testing.md` before devic
 Read-only flash capacity reporting and the disabled expansion research milestone are documented in `docs/STORAGE.md`, `docs/STORAGE_TESTING.md`, and `docs/STORAGE_RECOVERY.md`.
 
 The host-tested Extended Storage integration and its explicit physical-validation boundary are documented in `docs/EXTENDED_STORAGE.md`.
+
+On Windows:
+```
+wsl.exe sh -lc 'cd /mnt/c/Projects/SBStandaloneBase/StandaloneBase && ./scripts/build-arm.sh'
+$env:SB_RELEASE_BASE_URL = 'https://downloads.example.invalid/standalonebase'
+.\packaging\build-package.ps1
+```
+
+To produce another version, update:
+- $Version in [build-package.ps1 (line 8)]
+- zipfile in [build-package.sh (line 13)]
+- The displayed version in [StandaloneBaseApplet.lua]
+- Native version constants in [sbbase.h (line 10)]and [sbproxy.c (line 19)]
+- standalone_base_version in the ignored `.local/config.json`
+
+
+## deploy remote
+
+Deployment endpoints, account names, filesystem paths and container names are
+private local configuration. Copy `packaging/deployment.env.example` to
+`.local/deployment.env`, populate it locally, and never commit that file.

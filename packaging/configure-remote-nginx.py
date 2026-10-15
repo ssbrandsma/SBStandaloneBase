@@ -4,13 +4,14 @@ import shutil
 import subprocess
 import time
 
-ROUTE = "/sbstandalonebase/"
-ROOT = "/var/www/web-account/data/www/example.invalid"
-FILES = (
-    "/etc/nginx/conf.d/parking.conf",
-    "/etc/nginx/conf.d/sbstandalone-ip.conf",
-    "/etc/nginx/hosting-control-panel-sites/web-account/example.invalid.includes",
-)
+ROUTE = os.environ.get("SB_NGINX_ROUTE", "/sbstandalonebase/")
+ROOT = os.environ.get("SB_NGINX_ROOT")
+FILES = tuple(filter(None, os.environ.get("SB_NGINX_FILES", "").split(os.pathsep)))
+
+if not ROOT or not FILES:
+    raise SystemExit(
+        "Set SB_NGINX_ROOT and SB_NGINX_FILES in the private deployment environment"
+    )
 
 
 def route_block(with_root):

@@ -1,11 +1,15 @@
 [CmdletBinding()]
 param(
-    [string]$BaseUrl = 'http://203.0.113.10/sbstandalonebase',
-    [string]$OutputDirectory
+    [string]$BaseUrl = $env:SB_RELEASE_BASE_URL,
+    [string]$OutputDirectory,
+    [string]$ConfigPath
 )
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path $PSScriptRoot -Parent
-$Version = '0.3.1'
+$LocalDirectory = Join-Path $Root '.local'
+if (-not $ConfigPath) { $ConfigPath = Join-Path $LocalDirectory 'config.json' }
+if (-not $BaseUrl) { throw 'Set SB_RELEASE_BASE_URL or pass -BaseUrl; deployment endpoints are intentionally not stored in Git.' }
+$Version = '0.4.0'
 $ModuleSize = 199119
 $ModuleSha256 = '63652ce67df06a78abb84a4986253bdab02fbd7b7c000779c60b3d393ba9566b'
 $ImageSize = 1806336
@@ -23,6 +27,7 @@ $Files = [ordered]@{
     'TimeResolver.lua'          = (Join-Path $Root 'applet/TimeResolver.lua')
     'RemoteBridge.lua'          = (Join-Path $Root 'applet/RemoteBridge.lua')
     'ServerMigration.lua'       = (Join-Path $Root 'applet/ServerMigration.lua')
+    'NetworkAddress.lua'        = (Join-Path $Root 'applet/NetworkAddress.lua')
     'sbbase'                    = (Join-Path $Root 'build-arm/sbbase')
     'sbwebserver'               = (Join-Path $Root 'build-arm/sbwebserver')
     'sbproxy'                   = (Join-Path $Root 'build-arm/sbproxy')
@@ -37,8 +42,13 @@ $Files = [ordered]@{
     'style.css'                 = (Join-Path $Root 'native/sbwebserver/web/css/style.css')
     'app.js'                    = (Join-Path $Root 'native/sbwebserver/web/js/app.js')
     'remote.js'                 = (Join-Path $Root 'native/sbwebserver/web/js/remote.js')
+    'logs.js'                   = (Join-Path $Root 'native/sbwebserver/web/js/logs.js')
+    'performance.js'            = (Join-Path $Root 'native/sbwebserver/web/js/performance.js')
+    'uPlot.iife.min.js'         = (Join-Path $Root 'native/sbwebserver/web/vendor/uplot/uPlot.iife.min.js')
+    'uPlot.min.css'             = (Join-Path $Root 'native/sbwebserver/web/vendor/uplot/uPlot.min.css')
+    'UPLOT-LICENSE'             = (Join-Path $Root 'native/sbwebserver/web/vendor/uplot/LICENSE')
     'radio-front.webp'          = (Join-Path $Root 'native/sbwebserver/web/assets/virtual-radio/radio-front.webp')
-    'config.json'               = (Join-Path $Root 'config.json')
+    'config.json'               = $ConfigPath
     'catalog.json'              = (Join-Path $Root 'config/catalog.example.json')
     'cacert.pem'                = (Join-Path $Root 'native/sbproxy/cacert.pem')
 }
@@ -90,7 +100,7 @@ $Url = $BaseUrl.TrimEnd('/') + '/' + [IO.Path]::GetFileName($ZipPath)
 $Xml = @"
 <?xml version="1.0" encoding="UTF-8"?>
 <extensions><details><title lang="EN">StandaloneBase Applet Repository</title></details><applets>
-<applet name="StandaloneBase" version="$Version" target="baby" minTarget="7.7.3" maxTarget="*"><title lang="EN">Standalone Base</title><desc lang="EN">Local LMS-compatible infrastructure services for Squeezebox Radio.</desc><changes lang="EN">Reliably migrate LMS 9.1 firmware from the bootstrap server to the local LMS.</changes><creator>Sjoerd Brandsma</creator><url>$Url</url><sha>$Sha1</sha></applet>
+<applet name="StandaloneBase" version="$Version" target="baby" minTarget="7.7.3" maxTarget="*"><title lang="EN">Standalone Base</title><desc lang="EN">Local LMS-compatible infrastructure services for Squeezebox Radio.</desc><changes lang="EN">Add live system logs and lightweight system performance and process monitoring.</changes><creator>Sjoerd Brandsma</creator><url>$Url</url><sha>$Sha1</sha></applet>
 </applets></extensions>
 "@
 $Utf8 = New-Object Text.UTF8Encoding($false)

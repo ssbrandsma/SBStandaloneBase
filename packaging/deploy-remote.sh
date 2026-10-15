@@ -1,12 +1,23 @@
 #!/bin/sh
 set -eu
 
-version=0.3.1
-expected_sha=175849820388fbc98d3bd36a4b55e16b0932c697
+config=${SB_DEPLOY_CONFIG:-/tmp/standalonebase-deployment.env}
+test -r "$config" || {
+    echo "Missing private deployment configuration: $config" >&2
+    exit 1
+}
+# The configuration is intentionally local-only and must define BASE_ROOT,
+# MERGED_XML, BOOTSTRAP_CONFIG, WEB_OWNER, BOOTSTRAP_OWNER and CONTAINER_NAME.
+. "$config"
+: "${BASE_ROOT:?}" "${MERGED_XML:?}" "${BOOTSTRAP_CONFIG:?}"
+: "${WEB_OWNER:?}" "${BOOTSTRAP_OWNER:?}" "${CONTAINER_NAME:?}"
+
+version=0.4.0
+expected_sha=6c831f57d422fea64e08a85fe3562ee1800466fa
 stamp=$(date +%Y%m%d-%H%M%S)
-base_root=/var/www/web-account/data/www/example.invalid/sbstandalonebase
-merged_xml=/var/www/web-account/data/www/example.invalid/squeezebox/extensions.xml
-bootstrap_config=/var/www/bootstrap-account/data/squeezebox-bootstrap/config.json
+base_root=$BASE_ROOT
+merged_xml=$MERGED_XML
+bootstrap_config=$BOOTSTRAP_CONFIG
 
 test "$(sha1sum "/tmp/StandaloneBase-$version.zip" | cut -d' ' -f1)" = "$expected_sha"
 python3 -m json.tool "/tmp/squeezebox-config-standalonebase-$version.json" >/dev/null
@@ -21,10 +32,10 @@ mkdir -p "$base_root"
 
 install -o root -g root -m 0644 "/tmp/StandaloneBase-$version.zip" "$base_root/StandaloneBase-$version.zip"
 install -o root -g root -m 0644 "/tmp/standalonebase-extensions-$version.xml" "$base_root/extensions.xml"
-install -o web-account -g web-account -m 0644 "/tmp/merged-extensions-standalonebase-$version.xml" "$merged_xml"
-install -o bootstrap-account -g bootstrap-account -m 0644 "/tmp/squeezebox-config-standalonebase-$version.json" "$bootstrap_config"
+install -o "$WEB_OWNER" -g "$WEB_OWNER" -m 0644 "/tmp/merged-extensions-standalonebase-$version.xml" "$merged_xml"
+install -o "$BOOTSTRAP_OWNER" -g "$BOOTSTRAP_OWNER" -m 0644 "/tmp/squeezebox-config-standalonebase-$version.json" "$bootstrap_config"
 
 test "$(sha1sum "$base_root/StandaloneBase-$version.zip" | cut -d' ' -f1)" = "$expected_sha"
-docker restart bootstrap-container >/dev/null
-docker ps --format '{{.Names}} {{.Status}}' | grep '^bootstrap-container '
+docker restart "$CONTAINER_NAME" >/dev/null
+docker ps --format '{{.Names}} {{.Status}}' | grep -F "$CONTAINER_NAME "
 echo "Backup timestamp: $stamp"
