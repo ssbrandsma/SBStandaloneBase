@@ -1,3 +1,11 @@
+/*
+ * Native storage inspection, validation and preparation utilities.
+ *
+ * Supplies bounded storage operations and status to the Lua storage manager
+ * and storage setup/boot scripts. Complements sbwebserver's storage controls
+ * and the offline updater planner; it is a command-line helper, not a daemon.
+ */
+
 #define _POSIX_C_SOURCE 200809L
 #include <dirent.h>
 #include <errno.h>

@@ -1,3 +1,11 @@
+/*
+ * Bounded, read-only system and service log retrieval.
+ *
+ * Provides incremental log responses to the authenticated management routes
+ * in http_server.c. Supports the browser log viewer without a new daemon
+ * or persistent history, alongside monitor.c's performance snapshots.
+ */
+
 #define _POSIX_C_SOURCE 200809L
 #include "logs.h"
 

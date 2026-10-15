@@ -1,3 +1,11 @@
+/*
+ * Management webserver process entry point.
+ *
+ * Loads settings, applies command-line overrides and starts http_server.c.
+ * The Lua applet supervises this sbwebserver process alongside the local
+ * LMS-compatible sbbase service and the sbproxy compatibility proxy.
+ */
+
 #include "http_server.h"
 #include "settings.h"
 #include <stdio.h>

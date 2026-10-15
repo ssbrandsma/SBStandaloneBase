@@ -1,3 +1,11 @@
+/*
+ * Offline storage migration planner and simulated recovery-state machine.
+ *
+ * Calculates UBI allocation budgets and validates ordered migration states
+ * for storage tooling and host tests. Complements sb-storage-helper and the
+ * setup scripts; physical migration execution is deliberately disabled here.
+ */
+
 #define _POSIX_C_SOURCE 200809L
 #include <errno.h>
 #include <stdio.h>

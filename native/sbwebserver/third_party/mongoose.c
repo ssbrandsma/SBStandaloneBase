@@ -1,3 +1,11 @@
+/*
+ * Vendored Mongoose networking and HTTP implementation.
+ *
+ * Provides sockets, HTTP parsing and event dispatch beneath sbwebserver's
+ * http_server.c. Application routing, authorization and management features
+ * remain in the Standalone Base modules; upstream licensing follows below.
+ */
+
 // Copyright (c) 2004-2013 Sergey Lyubka
 // Copyright (c) 2013-2025 Cesanta Software Limited
 // All rights reserved

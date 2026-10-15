@@ -1,3 +1,11 @@
+/*
+ * Loopback HTTP-to-HTTPS compatibility proxy.
+ *
+ * Uses libcurl and bounded worker threads to fetch upstream resources for
+ * legacy Jive clients. Runs as the separate sbproxy service supervised by the
+ * Standalone Base Lua applet, alongside sbbase and sbwebserver.
+ */
+
 #define _POSIX_C_SOURCE 200809L
 
 #include <arpa/inet.h>

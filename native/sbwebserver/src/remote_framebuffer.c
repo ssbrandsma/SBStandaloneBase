@@ -1,3 +1,11 @@
+/*
+ * Linux framebuffer capture, pixel conversion and image generation.
+ *
+ * Provides layout validation and LCD frame handling for remote.c's Virtual
+ * Radio API. Encapsulates framebuffer-device details beneath the HTTP and
+ * remote-session layers; the host tests exercise its layout and pixel logic.
+ */
+
 #define _POSIX_C_SOURCE 200809L
 #include "remote_framebuffer.h"
 #include <errno.h>

@@ -1,3 +1,11 @@
+/*
+ * Management HTTP routing and Mongoose event-loop integration.
+ *
+ * Serves the browser UI, enforces shared authentication and write checks,
+ * and dispatches requests to system information, settings, applet repository,
+ * station, Virtual Radio, log and performance modules.
+ */
+
 #define _POSIX_C_SOURCE 200809L
 #include "http_server.h"
 #include "mongoose.h"

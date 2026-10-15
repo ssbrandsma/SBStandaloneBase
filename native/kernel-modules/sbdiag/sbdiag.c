@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Harmless loader/ABI probe. It registers no devices and touches no storage. */
+/*
+ * Diagnostic kernel-module loader and ABI compatibility probe.
+ *
+ * Used by Standalone Base storage research tooling to verify that a module
+ * can load on the Radio kernel before considering storage module support.
+ * Registers no devices, touches no storage and is not a runtime service.
+ */
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>

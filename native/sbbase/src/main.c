@@ -1,3 +1,11 @@
+/*
+ * Local LMS-compatible service and protocol event loop.
+ *
+ * Loads the applet catalog and coordinates discovery, SlimProto, HTTP and
+ * CometD connections for Jive. Uses protocol.c for wire-format responses and
+ * nowplaying.c for playback state and commands shared with audio integrations.
+ */
+
 #define _POSIX_C_SOURCE 200809L
 
 #include "sbbase.h"

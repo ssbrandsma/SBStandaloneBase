@@ -1,3 +1,10 @@
+/*
+ * LMS discovery and SlimProto response encoding.
+ *
+ * Provides the bounded protocol helpers used by sbbase's main event loop so
+ * the Jive applet can discover and connect to the local LMS-compatible service.
+ */
+
 #include "sbbase.h"
 #include <ctype.h>
 #include <stdio.h>

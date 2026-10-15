@@ -1,3 +1,11 @@
+/*
+ * Browser pairing, session authentication and trusted internal access.
+ *
+ * Maintains temporary PINs, bounded browser sessions and pairing attempt
+ * limits for http_server.c. Separates browser authorization from the trusted
+ * Jive channel used by the Web Access screen and Virtual Radio bridge.
+ */
+
 #define _POSIX_C_SOURCE 200809L
 #include "auth.h"
 #include <ctype.h>

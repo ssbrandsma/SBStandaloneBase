@@ -1,3 +1,11 @@
+/*
+ * Read-only system and storage information collection.
+ *
+ * Builds management overview data from local operating-system interfaces.
+ * Called by http_server.c; complements monitor.c's cumulative performance
+ * snapshots and logs.c's incremental diagnostic log access.
+ */
+
 #include "system_info.h"
 #include <stdio.h>
 #include <string.h>

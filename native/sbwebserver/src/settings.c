@@ -1,3 +1,11 @@
+/*
+ * Management webserver settings persistence.
+ *
+ * Loads defaults and stores the Settings values used by main.c and
+ * http_server.c, including listener and read-only management configuration.
+ * Browser pairing and session state are handled separately by auth.c.
+ */
+
 #include "settings.h"
 #include <stdio.h>
 #include <stdlib.h>

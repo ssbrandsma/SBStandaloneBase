@@ -1,3 +1,11 @@
+/*
+ * Installable applet catalog and local ZIP package management.
+ *
+ * Validates catalog edits and uploads, selects storage and publishes package
+ * downloads through http_server.c. The resulting catalog is also read by
+ * sbbase to supply Jive's LMS-compatible Applet Installer responses.
+ */
+
 #define _POSIX_C_SOURCE 200809L
 #include "repository.h"
 #include "mongoose.h"

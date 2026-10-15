@@ -1,3 +1,11 @@
+/*
+ * Host regression tests for Virtual Radio framebuffer handling.
+ *
+ * Exercises remote_framebuffer.c with synthetic layouts and pixels to check
+ * validation, conversion and capture helpers independently of remote.c's
+ * HTTP sessions and the physical Radio framebuffer.
+ */
+
 #include "remote_framebuffer.h"
 #include <assert.h>
 #include <stdio.h>

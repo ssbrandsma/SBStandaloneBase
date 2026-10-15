@@ -1,3 +1,11 @@
+/*
+ * Bounded system and process performance snapshot collection.
+ *
+ * Reads procfs counters and returns structured JSON through http_server.c.
+ * The performance.js frontend calculates deltas, retains graph history and
+ * renders process rows; this module keeps no persistent monitoring history.
+ */
+
 #define _POSIX_C_SOURCE 200809L
 #include "monitor.h"
 

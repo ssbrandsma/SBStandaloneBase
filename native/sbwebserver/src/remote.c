@@ -1,3 +1,11 @@
+/*
+ * Virtual Radio sessions, remote input queues and capture coordination.
+ *
+ * Handles browser remote-control requests and the trusted Jive bridge that
+ * delivers controls to the real interface. Uses remote_framebuffer.c for LCD
+ * capture and auth.c to protect access and suppress protected PIN screens.
+ */
+
 #define _POSIX_C_SOURCE 200809L
 #include "remote.h"
 #include "remote_framebuffer.h"

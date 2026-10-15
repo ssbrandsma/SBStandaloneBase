@@ -1,3 +1,11 @@
+/*
+ * Host regression tests for shared Now Playing state and commands.
+ *
+ * Exercises nowplaying.c directly to validate ownership, playback updates
+ * and command handling without running sbbase or real audio integrations.
+ * This executable is test tooling and is not part of the Radio runtime.
+ */
+
 #define _POSIX_C_SOURCE 200809L
 #include "nowplaying.h"
 #include <assert.h>

@@ -1,3 +1,11 @@
+/*
+ * Shared Now Playing state, ownership leases and playback command queues.
+ *
+ * Handles the internal playback API used by audio integrations and consumed
+ * through sbbase's HTTP/CometD service. Keeps playback state independent of
+ * browser management sessions and does not perform audio decoding itself.
+ */
+
 #define _POSIX_C_SOURCE 200809L
 #include "nowplaying.h"
 #include <ctype.h>

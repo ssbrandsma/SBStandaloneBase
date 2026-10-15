@@ -1,3 +1,11 @@
+/*
+ * Installed Jive applet discovery and metadata reporting.
+ *
+ * Inspects applet directories for the management overview and applet APIs.
+ * Works with http_server.c and complements repository.c, which manages the
+ * installable catalog and uploaded packages rather than installed applets.
+ */
+
 #include "applets.h"
 #include <ctype.h>
 #include <dirent.h>

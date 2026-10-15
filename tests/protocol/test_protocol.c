@@ -1,3 +1,11 @@
+/*
+ * Host regression tests for sbbase protocol response encoding.
+ *
+ * Calls protocol.c directly with synthetic discovery and SlimProto inputs
+ * to verify the wire-format helpers used by sbbase's service event loop.
+ * This executable is test tooling and is not part of the Radio runtime.
+ */
+
 #include "sbbase.h"
 #include <assert.h>
 #include <string.h>

@@ -1,3 +1,11 @@
+/*
+ * User-defined radio station configuration and logo management.
+ *
+ * Validates and persists the station catalog exposed by http_server.c for
+ * the browser's Standalone Radio tab. Supplies configuration to Standalone
+ * Radio while leaving stream playback to that separate applet.
+ */
+
 #define _POSIX_C_SOURCE 200809L
 #include "radio_stations.h"
 #include <ctype.h>
