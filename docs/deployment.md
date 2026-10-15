@@ -4,7 +4,13 @@ Build all ARM binaries, run host and QEMU checks, then create the ZIP. Publish n
 
 Installation copies the applet to `/usr/share/jive/applets/StandaloneBase`. On initialization it creates `/mnt/storage/standalonebase` and `/tmp/standalonebase`, starts the three services, migrates the configured bootstrap endpoint to the local service, and reports observed process state in **Standalone Base**.
 
-The packaged `config.json` provides an offline catalog containing Standalone Radio, Spotify Connect, and Qobuz Connect. At startup the applet starts its loopback HTTPS proxy, retrieves `https://raw.githubusercontent.com/ssbrandsma/SBStandaloneBase/master/config.json`, validates the expected base catalog identifiers, and atomically replaces `/mnt/storage/standalonebase/config.json`. If retrieval or validation fails, the last valid persistent file—or the packaged fallback on first boot—is retained. `sbbase` reads that file and returns these entries for the Applet Installer `jiveapplets` request.
+The package build embeds the ignored `.local/config.json`, which provides the
+deployment-specific offline applet catalog. The repository intentionally does
+not publish that catalog or its download endpoints. On first boot the packaged
+catalog is copied to `/mnt/storage/standalonebase/config.json`; `sbbase` reads
+that file and returns its entries for the Applet Installer `jiveapplets`
+request. Catalog updates must be supplied through the authenticated management
+interface or another explicitly configured private distribution channel.
 
 On initialization, the applet identifies the bootstrap service by its stable UUID or name and migrates its configured endpoint to `127.0.0.1`. It also replaces the bootstrap server UUID and name with the Standalone Base identity. Before changing a file, it preserves its original contents once in a sibling `.pre-standalonebase` backup. The migration is idempotent and does not modify unrelated configured servers.
 

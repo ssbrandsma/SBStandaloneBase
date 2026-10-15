@@ -11,6 +11,7 @@ local ExtendedStorageState = require("applets.StandaloneBase.ExtendedStorageStat
 local TimeSync = require("applets.StandaloneBase.TimeSync")
 local RemoteBridge = require("applets.StandaloneBase.RemoteBridge")
 local ServerMigration = require("applets.StandaloneBase.ServerMigration")
+local NetworkAddress = require("applets.StandaloneBase.NetworkAddress")
 local io, os, tonumber, tostring = io, os, tonumber, tostring
 local ipairs, pairs, math, pcall, string = ipairs, pairs, math, pcall, string
 local appletManager = appletManager
@@ -20,7 +21,6 @@ oo.class(_M, Applet)
 local ROOT = "/usr/share/jive/applets/StandaloneBase"
 local RUN = "/tmp/standalonebase"
 local CONFIG = "/mnt/storage/standalonebase/config.json"
-local REMOTE_CONFIG = "http://127.0.0.1:8765/https/raw.githubusercontent.com/ssbrandsma/SBStandaloneBase/master/config.json"
 local SERVICES = {
     { name="HTTPS Proxy", exe="sbproxy", args="--listen 127.0.0.1:8765" },
     { name="Bootstrap service", exe="sbbase", args="--config "..CONFIG },
@@ -150,24 +150,6 @@ end
 local function refreshConfig()
     local f=io.open(CONFIG,"r")
     if f then f:close() else os.execute("cp "..ROOT.."/config.json "..CONFIG) end
-    -- A catalog edited through the local repository UI is authoritative.
-    -- Automatic upstream refresh must not discard uploaded packages or edits.
-    local managed=io.open("/mnt/storage/standalonebase/.catalog-local","r")
-    if managed then managed:close(); return end
-    local tmp=RUN.."/config.json.download"
-    os.remove(tmp)
-    local ok=os.execute("wget -q -T 20 -O "..tmp.." "..REMOTE_CONFIG)
-    if ok == 0 then
-        local c=io.open(tmp,"r")
-        local body=c and c:read("*a") or ""
-        if c then c:close() end
-        if body:find('"StandaloneRadio"',1,true) and body:find('"SpotifyConnect"',1,true)
-            and body:find('"QobuzConnect"',1,true) then
-            os.rename(tmp,CONFIG)
-            return
-        end
-    end
-    os.remove(tmp)
 end
 function init(self)
     if started then return end; started=true
@@ -208,7 +190,7 @@ function menu(self)
     for _,s in ipairs(SERVICES) do menu:addItem({text=s.name..": "..(alive(s) and "Running" or "Stopped")}) end
     menu:addItem({text="Extended Storage",callback=function() self:storageMenu() end})
     menu:addItem({text="Web Access",callback=function() if not self.remoteBridge:isInjecting() then self:webAccessMenu() end end})
-    menu:addItem({text="Version: 0.3.1"})
+	menu:addItem({text="Version: 0.4.0"})
     window:addWidget(menu); window:show()
 end
 function webAccessMenu(self)
@@ -231,8 +213,10 @@ function showPairingCode(self,previous)
         local menu=SimpleMenu("menu")
         menu:setHeaderWidget(Textarea("help_text","Enter this code in the Standalone Base web page. Remote screen capture is disabled while the code is active."))
         local pinItem={text="Pairing code: "..pin:sub(1,3).." "..pin:sub(4,6),style="item_info"}
+        local address=NetworkAddress.current()
+        local addressItem={text=address and ("Web access: http://"..address) or "Web access: IP address unavailable",style="item_info"}
         local expiresItem={text="Expires in 02:00",style="item_info"}
-        menu:addItem(pinItem); menu:addItem(expiresItem)
+        menu:addItem(pinItem); menu:addItem(addressItem); menu:addItem(expiresItem)
         local remaining=seconds
         local timer
         timer=Timer(1000,function()

@@ -1,12 +1,28 @@
 #!/bin/sh
 set -eu
 server=$1
-root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+root=${SB_TEST_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)}
 work=$(mktemp -d)
 pid=
 trap 'test -z "$pid" || kill "$pid" 2>/dev/null || true; rm -rf "$work"' EXIT
 mkdir -p "$work/config" "$work/repository"
-cp "$root/config.json" "$work/config/config.json"
+cat >"$work/config/config.json" <<'JSON'
+{
+  "catalog_version": "1",
+  "standalone_base_version": "test",
+  "server": {
+    "name": "Standalone Base Test",
+    "uuid": "9d989f40-499a-4b85-b92f-8dc415af2a04",
+    "host": "127.0.0.1",
+    "advertise_ip": "127.0.0.1",
+    "http_port": 9000,
+    "slimproto_port": 3483,
+    "discovery_port": 3483,
+    "version": "test"
+  },
+  "applets": []
+}
+JSON
 python3 - "$work/Demo-1.0.zip" <<'PY'
 import sys, zipfile
 with zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_DEFLATED) as z:
@@ -14,7 +30,7 @@ with zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_DEFLATED) as z:
     z.writestr("Demo/DemoApplet.lua", "return {}")
 PY
 printf 'not-a-zip' >"$work/invalid.zip"
-SBWEBSERVER_CONFIG_DIR="$work/config" SB_REPOSITORY_ROOT="$work/repository" \
+SBWEBSERVER_CONFIG_DIR="$work/config" SB_REPOSITORY_INTERNAL_ROOT="$work/repository" \
 "$server" --port 18080 \
 --web-root "$root/native/sbwebserver/web" >"$work/server.log" 2>&1 &
 pid=$!
@@ -24,7 +40,7 @@ capability=$(cat "$work/config/remote.capability")
 pin=$(curl -sf -H "X-Remote-Capability: $capability" -X POST --data '' http://127.0.0.1:18080/api/internal/web-access/start | sed -n 's/.*"pin":"\([0-9][0-9]*\)".*/\1/p')
 curl -sf -c "$work/cookies" -H 'Content-Type: application/json' -X POST --data "{\"pin\":\"$pin\"}" http://127.0.0.1:18080/api/auth/pair >/dev/null
 curl -sf -b "$work/cookies" http://127.0.0.1:18080/api/applets >"$work/list.json"
-grep -q 'StandaloneRadio' "$work/list.json"
+grep -q '"applets"' "$work/list.json"
 test "$(curl -s -o /dev/null -w '%{http_code}' -F package=@"$work/Demo-1.0.zip" \
   'http://127.0.0.1:18080/api/applets/upload?name=Demo&title=Demo&version=1.0&target=baby&min_target_version=7.7')" = 401
 curl -sf -b "$work/cookies" \

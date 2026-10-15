@@ -50,7 +50,11 @@ printf '%s\n' "${SB_TEST_POST_DATA_BYTES:-67221504}" >"$volume/data_bytes"
 printf '%s\n' "${SB_TEST_POST_LEB_SIZE:-129024}" >"$volume/usable_eb_size"
 printf '%s\n' "${SB_TEST_POST_CORRUPTED:-0}" >"$volume/corrupted"
 printf '%s\n' "${SB_TEST_POST_UPD_MARKER:-0}" >"$volume/upd_marker"
-touch "$SB_STORAGE_ROOT/dev/ubi0_5"
+if test "${SB_TEST_DELAY_POST_CREATE:-0}" = 1; then
+    (sleep 1; touch "$SB_STORAGE_ROOT/dev/ubi0_5") &
+else
+    touch "$SB_STORAGE_ROOT/dev/ubi0_5"
+fi
 printf '%s\n' "${SB_TEST_POST_AVAILABLE_LEBS:-139}" >"$SB_STORAGE_ROOT/sys/class/ubi/ubi0/avail_eraseblocks"
 exit 0
 EOF
@@ -73,6 +77,22 @@ EOF
     chmod 755 "$fixture/usr/share/jive/applets/StandaloneBase/sb-storage-helper" \
         "$fixture/usr/share/jive/applets/StandaloneBase/storage-setup.sh" \
         "$fixture/usr/share/jive/applets/StandaloneBase/storage-boot.sh"
+}
+
+make_901() {
+    make_base
+    printf '9.0.1 r17084\n' >"$fixture/etc/squeezeos.version"
+    printf '1012\n' >"$fixture/sys/class/ubi/ubi0/total_eraseblocks"
+    printf '651\n' >"$fixture/sys/class/ubi/ubi0/avail_eraseblocks"
+    printf '2\n' >"$fixture/sys/class/ubi/ubi0/bad_peb_count"
+    rm -rf "$fixture/sys/class/ubi/ubi0/ubi0_0" "$fixture/sys/class/ubi/ubi0/ubi0_1" \
+        "$fixture/sys/class/ubi/ubi0/ubi0_2" "$fixture/sys/class/ubi/ubi0/ubi0_3" \
+        "$fixture/sys/class/ubi/ubi0/ubi0_4"
+    add_stock_volume 0 kernel 23 2967552
+    add_stock_volume 1 cramfs 113 14579712
+    add_stock_volume 2 ubifs 82 10579968
+    add_stock_volume 3 kernel_bak 23 2967552
+    add_stock_volume 4 cramfs_bak 106 13676544
 }
 
 add_stock_volume() {
@@ -110,7 +130,8 @@ assert_ubiupdatevol_not_called() { test ! -e "$fixture/tmp/ubiupdatevol.calls"; 
 assert_ubimkvol_not_called() { test ! -e "$fixture/tmp/ubimkvol.calls"; }
 
 run_init_raw() {
-    SB_STORAGE_ROOT="$fixture" SB_STORAGE_APPLET_DIR="$fixture/usr/share/jive/applets/StandaloneBase" \
+    SB_STORAGE_POST_CREATE_MAX_ATTEMPTS="${SB_STORAGE_POST_CREATE_MAX_ATTEMPTS:-1}" \
+        SB_STORAGE_ROOT="$fixture" SB_STORAGE_APPLET_DIR="$fixture/usr/share/jive/applets/StandaloneBase" \
         sh "$setup" initialize "$fixture/usr/share/jive/applets/StandaloneBase/sbubifs-authorized.ko" >/dev/null
 }
 
@@ -122,6 +143,14 @@ make_base; rm -rf "$fixture/sys/class/ubi/ubi0_4"; expect_status UNAVAILABLE
 make_base; expect_status AVAILABLE
 check | grep -q '^INITIALIZATION_SUPPORTED=1$'
 check | grep -q '^INITIALIZATION_REASON=validated_virgin_layout$'
+# Firmware 9.0.1 uses reordered production volumes, a larger cramfs, and may
+# have factory-managed bad eraseblocks. Its invariant geometry is also safe.
+make_901; expect_status AVAILABLE
+check | grep -q '^INITIALIZATION_SUPPORTED=1$'
+set +e; SB_TEST_POST_AVAILABLE_LEBS=130 run_init_raw; rc=$?; set -e
+test "$rc" = 22
+test "$(cat "$fixture/tmp/ubimkvol.calls")" = "$fixture/dev/ubi0 -n 5 -N sbdata -S 521 -t dynamic"
+test -s "$fixture/tmp/ubiupdatevol.calls"
 # Static SqueezeOS device nodes do not establish that a UBI volume exists.
 # Only the kernel's sysfs volume entry is authoritative.
 make_base; touch "$fixture/dev/ubi0_5"; expect_status AVAILABLE
@@ -155,7 +184,13 @@ expect_precreate_failure() {
 # Every virgin-layout invariant is a hard gate before ubimkvol.
 make_base; printf '9.0.1 r17084\n' >"$fixture/etc/squeezeos.version"; expect_precreate_failure 28
 make_base; printf '1013\n' >"$fixture/sys/class/ubi/ubi0/total_eraseblocks"; expect_precreate_failure 28
-make_base; printf '520\n' >"$fixture/sys/class/ubi/ubi0/avail_eraseblocks"; expect_precreate_failure 29
+make_base
+printf '599\n' >"$fixture/sys/class/ubi/ubi0/avail_eraseblocks"
+printf '61\n' >"$fixture/sys/class/ubi/ubi0/bad_peb_count"
+printf '953\n' >"$fixture/sys/class/ubi/ubi0/total_eraseblocks"
+expect_status AVAILABLE
+check | grep -q '^INITIALIZATION_SUPPORTED=0$'
+expect_precreate_failure 29
 make_base; printf '128000\n' >"$fixture/sys/class/ubi/ubi0/eraseblock_size"; expect_precreate_failure 28
 make_base; printf '4096\n' >"$fixture/sys/class/ubi/ubi0/min_io_size"; expect_precreate_failure 20
 make_base; rm -rf "$fixture/sys/class/ubi/ubi0_3"; expect_precreate_failure 28
@@ -196,6 +231,17 @@ set +e; run_init_raw; rc=$?; set -e
 test "$rc" = 22
 test "$(cat "$fixture/tmp/ubimkvol.calls")" = "$fixture/dev/ubi0 -n 5 -N sbdata -S 521 -t dynamic"
 test -e "$fixture/tmp/ubiupdatevol.calls"
+
+# Old firmware may expose the UBI volume before its device node is ready.
+# Bounded retries allow that asynchronous device creation to converge.
+make_base
+set +e
+SB_TEST_DELAY_POST_CREATE=1 SB_STORAGE_POST_CREATE_MAX_ATTEMPTS=3 run_init_raw
+rc=$?
+set -e
+test "$rc" = 22
+test -e "$fixture/tmp/ubiupdatevol.calls"
+grep -q 'Waiting for UBI volume readiness' "$fixture/tmp/sbstorage.log"
 
 # invalid image identity is visible and blocks initialize before the gate
 make_base; add_volume; printf x >>"$fixture/usr/share/jive/applets/StandaloneBase/sbdata-empty.ubifs"

@@ -136,6 +136,17 @@ the existing-sbdata profile. SqueezePlay remains running because stopping it
 triggers the Radio watchdog; initialization never stops it or bypasses the
 watchdog.
 
+## Firmware 9.0.1 / LMS 9.1 layout
+
+Firmware `9.0.1 r17084` uses the same NAND and UBI geometry but reorders the
+active and backup kernel/CramFS volume IDs and reserves 113 rather than 106
+LEBs for the active CramFS. The initialization gate recognizes this exact
+five-volume profile. Factory-managed bad eraseblocks are accepted only when
+`total_eraseblocks + bad_peb_count` remains 1,014 and
+`avail_eraseblocks + bad_peb_count` remains 653. At least 600 available LEBs
+are required before creating the 521-LEB `sbdata` volume, preserving a minimum
+79-LEB UBI reserve.
+
 ## Transaction after filesystem initialization
 
 The implemented post-format transaction:

@@ -4,12 +4,19 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 
+/**
+ * @brief Initialize sbdiag.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
 static int __init sbdiag_init(void)
 {
 	printk(KERN_INFO "sbdiag: loaded (diagnostic only)\n");
 	return 0;
 }
 
+/**
+ * @brief Handle sbdiag exit.
+ */
 static void __exit sbdiag_exit(void)
 {
 	printk(KERN_INFO "sbdiag: unloaded\n");
@@ -21,4 +28,3 @@ module_exit(sbdiag_exit);
 MODULE_DESCRIPTION("Squeezebox Radio kernel-module ABI probe");
 MODULE_AUTHOR("SBStandaloneBase");
 MODULE_LICENSE("GPL");
-

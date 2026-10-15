@@ -19,6 +19,10 @@ No fallback is used when SBUBIFS extended storage is unavailable. Reads return a
 
 Schema version 1 contains `schemaVersion`, monotonically increasing `revision`, and up to 250 station objects. Station fields are `id`, `name`, `description`, `streamUrl`, `logoUrl`, `logoFile`, `codec`, `enabled`, and `order`. IDs are stable restricted identifiers generated at creation. URLs must use HTTP or HTTPS. Codec hints are `auto`, `mp3`, `aac`, `ogg`, or `flac`. Names, descriptions, and URLs use the documented 256/1024/8192/4096 byte limits; the complete document is limited to 256 KiB and must be valid UTF-8. Orders and IDs must be unique.
 
+When extended storage is not active, the same files are stored in `/mnt/storage/standalonebase/radio`. This small internal-storage fallback keeps station management writable on the factory 8 MB volume; extended storage remains preferred when mounted.
+
+On a fresh installation the `config/radio` directory may not exist yet. Storage availability is determined from the writable mounted parent in that case, and the directory hierarchy is created by the first station write.
+
 When both artwork fields are set, `logoFile` takes precedence. Uploaded files are server-named and stored separately; `/api/radio/logos/<filename>` is the stable authenticated web URL. A future applet can resolve the file directly below the documented logos directory. PNG and JPEG are preferred for Jive compatibility; WebP is accepted for browser/future use but may not render in older Jive builds.
 
 ## API

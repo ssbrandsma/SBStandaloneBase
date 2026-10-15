@@ -58,7 +58,7 @@ set +e; out=$(run prepare); s=$?; set -e; test "$s" = 2; reason "$out" forbidden
 rm -rf "$fixture/sys/class/ubi/ubi0/ubi0_6"
 
 # Capacity reserve, unexpected production ID, and corruption.
-printf '584\n' >"$fixture/sys/class/ubi/ubi0/avail_eraseblocks"
+printf '599\n' >"$fixture/sys/class/ubi/ubi0/avail_eraseblocks"
 set +e; out=$(run prepare); s=$?; set -e; test "$s" = 2; reason "$out" insufficient_capacity_with_reserve
 printf '660\n' >"$fixture/sys/class/ubi/ubi0/avail_eraseblocks"
 mv "$fixture/sys/class/ubi/ubi0/ubi0_3" "$fixture/sys/class/ubi/ubi0/ubi0_7"

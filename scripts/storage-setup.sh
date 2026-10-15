@@ -61,7 +61,7 @@ stock_volume_exact() {
         && test "$(value "$stock/upd_marker")" = 0
 }
 
-stock_volume_set_exact() {
+stock_volume_set_773_exact() {
     stock_volume_exact 0 kernel_bak 23 2967552 || return 1
     stock_volume_exact 1 cramfs_bak 106 13676544 || return 1
     stock_volume_exact 2 ubifs 82 10579968 || return 1
@@ -73,20 +73,41 @@ stock_volume_set_exact() {
     done
 }
 
+stock_volume_set_901_exact() {
+    stock_volume_exact 0 kernel 23 2967552 || return 1
+    stock_volume_exact 1 cramfs 113 14579712 || return 1
+    stock_volume_exact 2 ubifs 82 10579968 || return 1
+    stock_volume_exact 3 kernel_bak 23 2967552 || return 1
+    stock_volume_exact 4 cramfs_bak 106 13676544 || return 1
+    for stock in "$UBI_CLASS"/ubi0_*; do
+        test -d "$stock" || continue
+        case ${stock##*_} in 0|1|2|3|4) ;; *) return 1 ;; esac
+    done
+}
+
+number() { case ${1:-} in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+
 virgin_layout_exact() {
-    test "$(value "$ROOT/etc/squeezeos.version")" = '7.7.3 r16676' \
-        && test -d "$UBI" \
+    firmware=$(value "$ROOT/etc/squeezeos.version")
+    layout_total=$(value "$UBI/total_eraseblocks")
+    layout_bad=$(value "$UBI/bad_peb_count")
+    layout_available=$(value "$UBI/avail_eraseblocks")
+    test -d "$UBI" \
         && device_node "$UBI_DEVICE" \
-        && test "$(value "$UBI/total_eraseblocks")" = 1014 \
         && test "$(value "$UBI/eraseblock_size")" = 129024 \
         && test "$(value "$UBI/min_io_size")" = 2048 \
-        && test "$(value "$UBI/bad_peb_count")" = 0 \
         && test "$(value "$UBI/reserved_for_bad")" = 10 \
-        && test "$(value "$UBI/avail_eraseblocks")" = 660 \
-        && stock_volume_set_exact \
+        && number "$layout_total" && number "$layout_bad" && number "$layout_available" \
+        && test $((layout_total + layout_bad)) = 1014 \
         && test ! -e "$VOLUME" \
         && test -z "$(mounted_type "$MOUNT")" \
-        && test -z "$(mounted_type "$SOURCE")"
+        && test -z "$(mounted_type "$SOURCE")" \
+        || return 1
+    case $firmware in
+        '7.7.3 r16676') test $((layout_available + layout_bad)) = 660 && stock_volume_set_773_exact ;;
+        '9.0.1 r17084') test $((layout_available + layout_bad)) = 653 && stock_volume_set_901_exact ;;
+        *) return 1 ;;
+    esac
 }
 
 status_snapshot() {
@@ -128,7 +149,7 @@ status_snapshot() {
         && "$HELPER" verify-module "$BUNDLED_MODULE" >/dev/null 2>&1 \
         && "$HELPER" verify-sbdata-image "$SBDATA_IMAGE" >/dev/null 2>&1 \
         && test -x "$UBIUPDATEVOL" \
-        && { exact_sbdata || test -x "$UBIMKVOL"; }; then
+        && { exact_sbdata || { test -x "$UBIMKVOL" && test "$(value "$UBI/avail_eraseblocks")" -ge 600; }; }; then
         init_supported=1
         if exact_sbdata; then init_reason=validated_packaged_image
         else init_reason=validated_virgin_layout; fi
@@ -240,24 +261,27 @@ initialize() {
         test "$(value "$VOLUME/usable_eb_size")" = 129024 || die 20 sbdata_leb_size_mismatch
         device_node "$VOLUME_DEVICE" || die 21 sbdata_device_node_missing
     else
-        test "$(value "$ROOT/etc/squeezeos.version")" = '7.7.3 r16676' || die 28 unsupported_virgin_layout
-        device_node "$UBI_DEVICE" || die 28 unsupported_virgin_layout
-        test "$(value "$UBI/total_eraseblocks")" = 1014 || die 28 unsupported_virgin_layout
-        test "$(value "$UBI/eraseblock_size")" = 129024 || die 28 unsupported_virgin_layout
-        test "$(value "$UBI/bad_peb_count")" = 0 || die 28 unsupported_virgin_layout
-        test "$(value "$UBI/reserved_for_bad")" = 10 || die 28 unsupported_virgin_layout
+        virgin_layout_exact || die 28 unsupported_virgin_layout
         available=$(value "$UBI/avail_eraseblocks")
         case $available in ''|*[!0-9]*) die 28 unsupported_virgin_layout ;; esac
-        test "$available" -ge 521 || die 29 insufficient_ubi_capacity
-        test "$available" = 660 || die 28 unsupported_virgin_layout
-        stock_volume_set_exact || die 28 unsupported_virgin_layout
+        test "$available" -ge 600 || die 29 insufficient_ubi_capacity
         test -x "$UBIMKVOL" || die 30 ubimkvol_unavailable
 
         stage CREATING_VOLUME
         "$UBIMKVOL" "$UBI_DEVICE" -n 5 -N sbdata -S 521 -t dynamic >>"$LOG_FILE" 2>&1 \
             || die 31 volume_creation_failure
-        exact_sbdata || die 32 post_creation_validation_failure
-        test "$(value "$UBI/avail_eraseblocks")" = 139 || die 32 post_creation_validation_failure
+        post_create_attempt=1
+        post_create_max_attempts=${SB_STORAGE_POST_CREATE_MAX_ATTEMPTS:-10}
+        while ! { exact_sbdata \
+            && test "$(value "$UBI/avail_eraseblocks")" = $((available - 521)); }; do
+            test "$post_create_attempt" -lt "$post_create_max_attempts" \
+                || die 32 post_creation_validation_failure
+            printf '%s Waiting for UBI volume readiness (attempt %s/%s)\n' \
+                "$(date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo unknown-time)" \
+                "$post_create_attempt" "$post_create_max_attempts" >>"$LOG_FILE"
+            sleep 1
+            post_create_attempt=$((post_create_attempt + 1))
+        done
     fi
 
     stage INITIALIZING_FILESYSTEM

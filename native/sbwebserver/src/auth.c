@@ -10,31 +10,579 @@
 #define SESSION_LIFE 86400
 #define PIN_LIFE 120
 #define CLIENT_LIMIT 4
-typedef struct {unsigned char hash[32];time_t expires;unsigned long serial;} Session;
-typedef struct {unsigned char ip[16];int ip6;unsigned failures;time_t window,cooldown;} ClientLimit;
-static struct {Session sessions[SESSION_MAX];ClientLimit clients[CLIENT_LIMIT];char pin[7];time_t pin_expires;unsigned pin_attempts;time_t global_window,global_cooldown;unsigned global_failures;unsigned long serial;} A;
 
-static int eq(struct mg_str a,const char*b){return a.len==strlen(b)&&!memcmp(a.buf,b,a.len);}
-static void headers(char*out,size_t n,const char*extra){snprintf(out,n,"Content-Type: application/json\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\n%s",extra?extra:"");}
-static void json(struct mg_connection*c,int code,const char*b,const char*extra){char h[500];headers(h,sizeof h,extra);mg_http_reply(c,code,h,"%s",b);}
-static void failure(struct mg_connection*c,int code,const char*m){char b[300];snprintf(b,sizeof b,"{\"error\":\"%s\"}",m);json(c,code,b,NULL);}
-static int secure_random(void*out,size_t n){FILE*f=fopen("/dev/urandom","rb");int ok=f&&fread(out,1,n,f)==n;if(f)fclose(f);return ok?0:-1;}
-static int constant_eq(const unsigned char*a,const unsigned char*b,size_t n){unsigned x=0;for(size_t i=0;i<n;i++)x|=a[i]^b[i];return x==0;}
-static void hash_token(const unsigned char*t,unsigned char h[32]){mg_sha256(h,(uint8_t*)t,32);}
-static int hexval(char c){if(c>='0'&&c<='9')return c-'0';if(c>='a'&&c<='f')return c-'a'+10;if(c>='A'&&c<='F')return c-'A'+10;return-1;}
-static int cookie_token(struct mg_http_message*m,unsigned char out[32]){struct mg_str*h=mg_http_get_header(m,"Cookie");if(!h)return 0;const char*p=h->buf,*end=h->buf+h->len;while(p<end){while(p<end&&(*p==' '||*p==';'))p++;const char*k=p;while(p<end&&*p!='='&&*p!=';')p++;if(p<end&&*p=='='&&(size_t)(p-k)==10&&!memcmp(k,"sb_session",10)){p++;if(end-p<64)return 0;for(int i=0;i<32;i++){int a=hexval(p[i*2]),b=hexval(p[i*2+1]);if(a<0||b<0)return 0;out[i]=(unsigned char)(a*16+b);}return p+64==end||p[64]==';'||p[64]==' ';}while(p<end&&*p!=';')p++;}return 0;}
-int auth_session_ok(struct mg_http_message*m,time_t*expires){unsigned char raw[32],hash[32];time_t now=time(NULL);if(!cookie_token(m,raw))return 0;hash_token(raw,hash);for(int i=0;i<SESSION_MAX;i++)if(A.sessions[i].expires>now&&constant_eq(hash,A.sessions[i].hash,32)){if(expires)*expires=A.sessions[i].expires;memset(raw,0,sizeof raw);memset(hash,0,sizeof hash);return 1;}memset(raw,0,sizeof raw);memset(hash,0,sizeof hash);return 0;}
-static void clear_current(struct mg_http_message*m){unsigned char raw[32],hash[32];if(!cookie_token(m,raw))return;hash_token(raw,hash);for(int i=0;i<SESSION_MAX;i++)if(constant_eq(hash,A.sessions[i].hash,32))memset(&A.sessions[i],0,sizeof A.sessions[i]);memset(raw,0,sizeof raw);memset(hash,0,sizeof hash);}
-void auth_revoke_all(void){memset(A.sessions,0,sizeof A.sessions);A.pin[0]=0;A.pin_expires=0;A.pin_attempts=0;}
-void auth_init(void){memset(&A,0,sizeof A);}
-void auth_free(void){memset(&A,0,sizeof A);}
-int auth_pairing_protected(void){if(A.pin[0]&&A.pin_expires>time(NULL))return 1;if(A.pin[0]){memset(A.pin,0,sizeof A.pin);A.pin_expires=0;}return 0;}
-int auth_origin_ok(struct mg_http_message*m){struct mg_str*o=mg_http_get_header(m,"Origin"),*h=mg_http_get_header(m,"Host");const char*p;if(!o)return 1;if(!h||o->len>300||h->len>200)return 0;p=memmem(o->buf,o->len,"://",3);return p&&(size_t)(o->buf+o->len-(p+3))==h->len&&!memcmp(p+3,h->buf,h->len);}
-int auth_is_endpoint(struct mg_str u){return(u.len>=9&&!memcmp(u.buf,"/api/auth",9))||(u.len>=24&&!memcmp(u.buf,"/api/internal/web-access",24));}
-static ClientLimit*client_limit(struct mg_connection*c){time_t now=time(NULL);ClientLimit*empty=NULL,*oldest=&A.clients[0];size_t z=c->rem.is_ip6?16:4;for(int i=0;i<CLIENT_LIMIT;i++){ClientLimit*x=&A.clients[i];if(!x->window&&!empty)empty=x;if(x->window<oldest->window)oldest=x;if(x->window&&x->ip6==c->rem.is_ip6&&!memcmp(x->ip,c->rem.ip,z))return x;}ClientLimit*x=empty?empty:oldest;memset(x,0,sizeof*x);x->ip6=c->rem.is_ip6;memcpy(x->ip,c->rem.ip,z);x->window=now;return x;}
-static int limited(struct mg_connection*c){time_t now=time(NULL);ClientLimit*x=client_limit(c);if(A.global_cooldown>now||x->cooldown>now)return 1;if(now-A.global_window>=60){A.global_window=now;A.global_failures=0;}if(now-x->window>=60){x->window=now;x->failures=0;}return A.global_failures>=10||x->failures>=5;}
-static void record_failure(struct mg_connection*c){time_t now=time(NULL);ClientLimit*x=client_limit(c);if(now-A.global_window>=60){A.global_window=now;A.global_failures=0;}if(now-x->window>=60){x->window=now;x->failures=0;}if(++A.global_failures>=10)A.global_cooldown=now+30;if(++x->failures>=5)x->cooldown=now+30;if(++A.pin_attempts>=5){memset(A.pin,0,sizeof A.pin);A.pin_expires=0;}}
-static int issue_pin(char out[7]){uint32_t v,limit=UINT32_MAX-(UINT32_MAX%1000000u);do{if(secure_random(&v,sizeof v))return-1;}while(v>=limit);snprintf(A.pin,sizeof A.pin,"%06u",v%1000000u);A.pin_expires=time(NULL)+PIN_LIFE;A.pin_attempts=0;snprintf(out,7,"%s",A.pin);return 0;}
-static void internal(struct mg_connection*c,struct mg_http_message*m,int allowed){char pin[7],b[160];if(!allowed){failure(c,403,"Internal authentication failed");return;}if(eq(m->uri,"/api/internal/web-access/start")&&eq(m->method,"POST")){if(issue_pin(pin)){failure(c,503,"Secure random source unavailable");return;}snprintf(b,sizeof b,"{\"pin\":\"%s\",\"expiresIn\":%d}",pin,PIN_LIFE);json(c,200,b,NULL);memset(pin,0,sizeof pin);return;}if(eq(m->uri,"/api/internal/web-access/cancel")&&eq(m->method,"POST")){memset(A.pin,0,sizeof A.pin);A.pin_expires=0;json(c,200,"{\"ok\":true}",NULL);return;}if(eq(m->uri,"/api/internal/web-access/revoke-all")&&eq(m->method,"POST")){auth_revoke_all();json(c,200,"{\"ok\":true}",NULL);return;}failure(c,404,"Internal endpoint not found");}
-static void pair(struct mg_connection*c,struct mg_http_message*m){char*pin;unsigned char raw[32],hash[32];char hex[65],cookie[300],body[100];time_t now=time(NULL);if(!eq(m->method,"POST")){failure(c,405,"Method not allowed");return;}if(m->body.len>128){failure(c,413,"Pairing request is too large");return;}if(!auth_origin_ok(m)){failure(c,403,"Cross-origin request rejected");return;}if(limited(c)){failure(c,429,"Pairing temporarily unavailable");return;}pin=mg_json_get_str(m->body,"$.pin");int valid=pin&&strlen(pin)==6;for(int i=0;valid&&i<6;i++)valid=isdigit((unsigned char)pin[i]);if(!valid||!auth_pairing_protected()||!constant_eq((unsigned char*)pin,(unsigned char*)A.pin,6)){free(pin);record_failure(c);failure(c,401,"Pairing failed");return;}free(pin);memset(A.pin,0,sizeof A.pin);A.pin_expires=0;A.pin_attempts=0;if(secure_random(raw,sizeof raw)){failure(c,503,"Secure random source unavailable");return;}hash_token(raw,hash);int slot=-1;time_t oldest=0;for(int i=0;i<SESSION_MAX;i++){if(A.sessions[i].expires<=now){slot=i;break;}if(slot<0||A.sessions[i].expires<oldest){slot=i;oldest=A.sessions[i].expires;}}memcpy(A.sessions[slot].hash,hash,32);A.sessions[slot].expires=now+SESSION_LIFE;A.sessions[slot].serial=++A.serial;for(int i=0;i<32;i++)sprintf(hex+i*2,"%02x",raw[i]);snprintf(cookie,sizeof cookie,"Set-Cookie: sb_session=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Strict\r\n",hex,SESSION_LIFE);snprintf(body,sizeof body,"{\"authenticated\":true,\"expiresAt\":%ld}",(long)A.sessions[slot].expires);json(c,200,body,cookie);memset(raw,0,sizeof raw);memset(hash,0,sizeof hash);memset(hex,0,sizeof hex);}
-int auth_handle(struct mg_connection*c,struct mg_http_message*m,int internal_ok){time_t expires=0;char b[120];if(m->uri.len>=24&&!memcmp(m->uri.buf,"/api/internal/web-access",24)){internal(c,m,internal_ok);return 1;}if(eq(m->uri,"/api/auth/status")){int ok=auth_session_ok(m,&expires);snprintf(b,sizeof b,"{\"authenticated\":%s%s%ld%s}",ok?"true,\"expiresAt\":" : "false",ok?"":"",ok?(long)expires:0L,ok?"":"");if(!ok)strcpy(b,"{\"authenticated\":false}");json(c,200,b,NULL);return 1;}if(eq(m->uri,"/api/auth/pair")){pair(c,m);return 1;}if(eq(m->uri,"/api/auth/logout")){if(!eq(m->method,"POST")||!auth_origin_ok(m)){failure(c,403,"Request rejected");return 1;}clear_current(m);json(c,200,"{\"ok\":true}","Set-Cookie: sb_session=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict\r\n");return 1;}if(eq(m->uri,"/api/auth/revoke-all")){if(!auth_session_ok(m,NULL)||!eq(m->method,"POST")||!auth_origin_ok(m)){failure(c,403,"Request rejected");return 1;}auth_revoke_all();json(c,200,"{\"ok\":true}","Set-Cookie: sb_session=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict\r\n");return 1;}failure(c,404,"Authentication endpoint not found");return 1;}
+typedef struct {
+	unsigned char hash[32];
+	time_t expires;
+	unsigned long serial;
+} Session;
+
+typedef struct {
+	unsigned char ip[16];
+	int ip6;
+	unsigned failures;
+	time_t window, cooldown;
+} ClientLimit;
+
+static struct {
+	Session sessions[SESSION_MAX];
+	ClientLimit clients[CLIENT_LIMIT];
+	char pin[7];
+	time_t pin_expires;
+	unsigned pin_attempts;
+	time_t global_window, global_cooldown;
+	unsigned global_failures;
+	unsigned long serial;
+} A;
+
+/**
+ * @brief Handle eq.
+ * @param a Input value for a.
+ * @param b Input text for b.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+static int eq(struct mg_str a, const char *b)
+{
+	return a.len == strlen(b) && !memcmp(a.buf, b, a.len);
+}
+
+/**
+ * @brief Handle headers.
+ * @param out Destination buffer for the result.
+ * @param n Capacity or item count associated with the operation.
+ * @param extra Input text for extra.
+ */
+static void headers(char *out, size_t n, const char *extra)
+{
+	snprintf(out,
+		 n,
+		 "Content-Type: application/json\r\nCache-Control: "
+		 "no-store\r\nX-Content-Type-Options: "
+		 "nosniff\r\nReferrer-Policy: no-referrer\r\n%s",
+		 extra ? extra : "");
+}
+
+/**
+ * @brief Handle json.
+ * @param c Mongoose connection handling the request.
+ * @param code Status or response code.
+ * @param b Input text for b.
+ * @param extra Input text for extra.
+ */
+static void
+json(struct mg_connection *c, int code, const char *b, const char *extra)
+{
+	char h[500];
+	headers(h, sizeof h, extra);
+	mg_http_reply(c, code, h, "%s", b);
+}
+
+/**
+ * @brief Handle failure.
+ * @param c Mongoose connection handling the request.
+ * @param code Status or response code.
+ * @param m Input text for m.
+ */
+static void failure(struct mg_connection *c, int code, const char *m)
+{
+	char b[300];
+	snprintf(b, sizeof b, "{\"error\":\"%s\"}", m);
+	json(c, code, b, NULL);
+}
+
+/**
+ * @brief Handle secure random.
+ * @param out Destination buffer for the result.
+ * @param n Capacity or item count associated with the operation.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+static int secure_random(void *out, size_t n)
+{
+	FILE *f = fopen("/dev/urandom", "rb");
+	int ok = f && fread(out, 1, n, f) == n;
+	if (f)
+		fclose(f);
+	return ok ? 0 : -1;
+}
+
+/**
+ * @brief Handle constant eq.
+ * @param a Input text for a.
+ * @param b Input text for b.
+ * @param n Capacity or item count associated with the operation.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+static int constant_eq(const unsigned char *a, const unsigned char *b, size_t n)
+{
+	unsigned x = 0;
+	for (size_t i = 0; i < n; i++)
+		x |= a[i] ^ b[i];
+	return x == 0;
+}
+
+/**
+ * @brief Handle hash token.
+ * @param t Input text for t.
+ * @param h Numeric value for h.
+ */
+static void hash_token(const unsigned char *t, unsigned char h[32])
+{
+	mg_sha256(h, (uint8_t *)t, 32);
+}
+
+/**
+ * @brief Handle hexval.
+ * @param c Input value for c.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+static int hexval(char c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return c - 'a' + 10;
+	if (c >= 'A' && c <= 'F')
+		return c - 'A' + 10;
+	return -1;
+}
+
+/**
+ * @brief Handle cookie token.
+ * @param m HTTP request message.
+ * @param out Destination buffer for the result.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+static int cookie_token(struct mg_http_message *m, unsigned char out[32])
+{
+	struct mg_str *h = mg_http_get_header(m, "Cookie");
+	if (!h)
+		return 0;
+	const char *p = h->buf, *end = h->buf + h->len;
+	while (p < end) {
+		while (p < end && (*p == ' ' || *p == ';'))
+			p++;
+		const char *k = p;
+		while (p < end && *p != '=' && *p != ';')
+			p++;
+		if (p < end && *p == '=' && (size_t)(p - k) == 10 &&
+		    !memcmp(k, "sb_session", 10)) {
+			p++;
+			if (end - p < 64)
+				return 0;
+			for (int i = 0; i < 32; i++) {
+				int a = hexval(p[i * 2]),
+				    b = hexval(p[i * 2 + 1]);
+				if (a < 0 || b < 0)
+					return 0;
+				out[i] = (unsigned char)(a * 16 + b);
+			}
+			return p + 64 == end || p[64] == ';' || p[64] == ' ';
+		}
+		while (p < end && *p != ';')
+			p++;
+	}
+	return 0;
+}
+
+/**
+ * @brief Handle auth session ok.
+ * @param m HTTP request message.
+ * @param expires Object referenced by expires.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+int auth_session_ok(struct mg_http_message *m, time_t *expires)
+{
+	unsigned char raw[32], hash[32];
+	time_t now = time(NULL);
+	if (!cookie_token(m, raw))
+		return 0;
+	hash_token(raw, hash);
+	for (int i = 0; i < SESSION_MAX; i++)
+		if (A.sessions[i].expires > now &&
+		    constant_eq(hash, A.sessions[i].hash, 32)) {
+			if (expires)
+				*expires = A.sessions[i].expires;
+			memset(raw, 0, sizeof raw);
+			memset(hash, 0, sizeof hash);
+			return 1;
+		}
+	memset(raw, 0, sizeof raw);
+	memset(hash, 0, sizeof hash);
+	return 0;
+}
+
+/**
+ * @brief Handle clear current.
+ * @param m HTTP request message.
+ */
+static void clear_current(struct mg_http_message *m)
+{
+	unsigned char raw[32], hash[32];
+	if (!cookie_token(m, raw))
+		return;
+	hash_token(raw, hash);
+	for (int i = 0; i < SESSION_MAX; i++)
+		if (constant_eq(hash, A.sessions[i].hash, 32))
+			memset(&A.sessions[i], 0, sizeof A.sessions[i]);
+	memset(raw, 0, sizeof raw);
+	memset(hash, 0, sizeof hash);
+}
+
+/**
+ * @brief Handle auth revoke all.
+ */
+void auth_revoke_all(void)
+{
+	memset(A.sessions, 0, sizeof A.sessions);
+	A.pin[0] = 0;
+	A.pin_expires = 0;
+	A.pin_attempts = 0;
+}
+
+/**
+ * @brief Initialize auth.
+ */
+void auth_init(void)
+{
+	memset(&A, 0, sizeof A);
+}
+
+/**
+ * @brief Release resources owned by auth.
+ */
+void auth_free(void)
+{
+	memset(&A, 0, sizeof A);
+}
+
+/**
+ * @brief Handle auth pairing protected.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+int auth_pairing_protected(void)
+{
+	if (A.pin[0] && A.pin_expires > time(NULL))
+		return 1;
+	if (A.pin[0]) {
+		memset(A.pin, 0, sizeof A.pin);
+		A.pin_expires = 0;
+	}
+	return 0;
+}
+
+/**
+ * @brief Handle auth origin ok.
+ * @param m HTTP request message.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+int auth_origin_ok(struct mg_http_message *m)
+{
+	struct mg_str *o = mg_http_get_header(m, "Origin"),
+		      *h = mg_http_get_header(m, "Host");
+	const char *p;
+	if (!o)
+		return 1;
+	if (!h || o->len > 300 || h->len > 200)
+		return 0;
+	p = memmem(o->buf, o->len, "://", 3);
+	return p && (size_t)(o->buf + o->len - (p + 3)) == h->len &&
+	       !memcmp(p + 3, h->buf, h->len);
+}
+
+/**
+ * @brief Check whether auth is endpoint.
+ * @param u Input value for u.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+int auth_is_endpoint(struct mg_str u)
+{
+	return (u.len >= 9 && !memcmp(u.buf, "/api/auth", 9)) ||
+	       (u.len >= 24 && !memcmp(u.buf, "/api/internal/web-access", 24));
+}
+
+/**
+ * @brief Handle client limit.
+ * @param c Mongoose connection handling the request.
+ * @return Pointer to the requested object, or `NULL` when unavailable.
+ */
+static ClientLimit *client_limit(struct mg_connection *c)
+{
+	time_t now = time(NULL);
+	ClientLimit *empty = NULL, *oldest = &A.clients[0];
+	size_t z = c->rem.is_ip6 ? 16 : 4;
+	for (int i = 0; i < CLIENT_LIMIT; i++) {
+		ClientLimit *x = &A.clients[i];
+		if (!x->window && !empty)
+			empty = x;
+		if (x->window < oldest->window)
+			oldest = x;
+		if (x->window && x->ip6 == c->rem.is_ip6 &&
+		    !memcmp(x->ip, c->rem.ip, z))
+			return x;
+	}
+	ClientLimit *x = empty ? empty : oldest;
+	memset(x, 0, sizeof *x);
+	x->ip6 = c->rem.is_ip6;
+	memcpy(x->ip, c->rem.ip, z);
+	x->window = now;
+	return x;
+}
+
+/**
+ * @brief Handle limited.
+ * @param c Mongoose connection handling the request.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+static int limited(struct mg_connection *c)
+{
+	time_t now = time(NULL);
+	ClientLimit *x = client_limit(c);
+	if (A.global_cooldown > now || x->cooldown > now)
+		return 1;
+	if (now - A.global_window >= 60) {
+		A.global_window = now;
+		A.global_failures = 0;
+	}
+	if (now - x->window >= 60) {
+		x->window = now;
+		x->failures = 0;
+	}
+	return A.global_failures >= 10 || x->failures >= 5;
+}
+
+/**
+ * @brief Handle record failure.
+ * @param c Mongoose connection handling the request.
+ */
+static void record_failure(struct mg_connection *c)
+{
+	time_t now = time(NULL);
+	ClientLimit *x = client_limit(c);
+	if (now - A.global_window >= 60) {
+		A.global_window = now;
+		A.global_failures = 0;
+	}
+	if (now - x->window >= 60) {
+		x->window = now;
+		x->failures = 0;
+	}
+	if (++A.global_failures >= 10)
+		A.global_cooldown = now + 30;
+	if (++x->failures >= 5)
+		x->cooldown = now + 30;
+	if (++A.pin_attempts >= 5) {
+		memset(A.pin, 0, sizeof A.pin);
+		A.pin_expires = 0;
+	}
+}
+
+/**
+ * @brief Handle issue pin.
+ * @param out Destination buffer for the result.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+static int issue_pin(char out[7])
+{
+	uint32_t v, limit = UINT32_MAX - (UINT32_MAX % 1000000u);
+	do {
+		if (secure_random(&v, sizeof v))
+			return -1;
+	} while (v >= limit);
+	snprintf(A.pin, sizeof A.pin, "%06u", v % 1000000u);
+	A.pin_expires = time(NULL) + PIN_LIFE;
+	A.pin_attempts = 0;
+	snprintf(out, 7, "%s", A.pin);
+	return 0;
+}
+
+/**
+ * @brief Handle internal.
+ * @param c Mongoose connection handling the request.
+ * @param m HTTP request message.
+ * @param allowed Numeric value for allowed.
+ */
+static void
+internal(struct mg_connection *c, struct mg_http_message *m, int allowed)
+{
+	char pin[7], b[160];
+	if (!allowed) {
+		failure(c, 403, "Internal authentication failed");
+		return;
+	}
+	if (eq(m->uri, "/api/internal/web-access/start") &&
+	    eq(m->method, "POST")) {
+		if (issue_pin(pin)) {
+			failure(c, 503, "Secure random source unavailable");
+			return;
+		}
+		snprintf(b,
+			 sizeof b,
+			 "{\"pin\":\"%s\",\"expiresIn\":%d}",
+			 pin,
+			 PIN_LIFE);
+		json(c, 200, b, NULL);
+		memset(pin, 0, sizeof pin);
+		return;
+	}
+	if (eq(m->uri, "/api/internal/web-access/cancel") &&
+	    eq(m->method, "POST")) {
+		memset(A.pin, 0, sizeof A.pin);
+		A.pin_expires = 0;
+		json(c, 200, "{\"ok\":true}", NULL);
+		return;
+	}
+	if (eq(m->uri, "/api/internal/web-access/revoke-all") &&
+	    eq(m->method, "POST")) {
+		auth_revoke_all();
+		json(c, 200, "{\"ok\":true}", NULL);
+		return;
+	}
+	failure(c, 404, "Internal endpoint not found");
+}
+
+/**
+ * @brief Handle pair.
+ * @param c Mongoose connection handling the request.
+ * @param m HTTP request message.
+ */
+static void pair(struct mg_connection *c, struct mg_http_message *m)
+{
+	char *pin;
+	unsigned char raw[32], hash[32];
+	char hex[65], cookie[300], body[100];
+	time_t now = time(NULL);
+	if (!eq(m->method, "POST")) {
+		failure(c, 405, "Method not allowed");
+		return;
+	}
+	if (m->body.len > 128) {
+		failure(c, 413, "Pairing request is too large");
+		return;
+	}
+	if (!auth_origin_ok(m)) {
+		failure(c, 403, "Cross-origin request rejected");
+		return;
+	}
+	if (limited(c)) {
+		failure(c, 429, "Pairing temporarily unavailable");
+		return;
+	}
+	pin = mg_json_get_str(m->body, "$.pin");
+	int valid = pin && strlen(pin) == 6;
+	for (int i = 0; valid && i < 6; i++)
+		valid = isdigit((unsigned char)pin[i]);
+	if (!valid || !auth_pairing_protected() ||
+	    !constant_eq((unsigned char *)pin, (unsigned char *)A.pin, 6)) {
+		free(pin);
+		record_failure(c);
+		failure(c, 401, "Pairing failed");
+		return;
+	}
+	free(pin);
+	memset(A.pin, 0, sizeof A.pin);
+	A.pin_expires = 0;
+	A.pin_attempts = 0;
+	if (secure_random(raw, sizeof raw)) {
+		failure(c, 503, "Secure random source unavailable");
+		return;
+	}
+	hash_token(raw, hash);
+	int slot = -1;
+	time_t oldest = 0;
+	for (int i = 0; i < SESSION_MAX; i++) {
+		if (A.sessions[i].expires <= now) {
+			slot = i;
+			break;
+		}
+		if (slot < 0 || A.sessions[i].expires < oldest) {
+			slot = i;
+			oldest = A.sessions[i].expires;
+		}
+	}
+	memcpy(A.sessions[slot].hash, hash, 32);
+	A.sessions[slot].expires = now + SESSION_LIFE;
+	A.sessions[slot].serial = ++A.serial;
+	for (int i = 0; i < 32; i++)
+		sprintf(hex + i * 2, "%02x", raw[i]);
+	snprintf(cookie,
+		 sizeof cookie,
+		 "Set-Cookie: sb_session=%s; Max-Age=%d; Path=/; HttpOnly; "
+		 "SameSite=Strict\r\n",
+		 hex,
+		 SESSION_LIFE);
+	snprintf(body,
+		 sizeof body,
+		 "{\"authenticated\":true,\"expiresAt\":%ld}",
+		 (long)A.sessions[slot].expires);
+	json(c, 200, body, cookie);
+	memset(raw, 0, sizeof raw);
+	memset(hash, 0, sizeof hash);
+	memset(hex, 0, sizeof hex);
+}
+
+/**
+ * @brief Handle auth handle.
+ * @param c Mongoose connection handling the request.
+ * @param m HTTP request message.
+ * @param internal_ok Numeric value for internal ok.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+int auth_handle(struct mg_connection *c,
+		struct mg_http_message *m,
+		int internal_ok)
+{
+	time_t expires = 0;
+	char b[120];
+	if (m->uri.len >= 24 &&
+	    !memcmp(m->uri.buf, "/api/internal/web-access", 24)) {
+		internal(c, m, internal_ok);
+		return 1;
+	}
+	if (eq(m->uri, "/api/auth/status")) {
+		int ok = auth_session_ok(m, &expires);
+		snprintf(b,
+			 sizeof b,
+			 "{\"authenticated\":%s%s%ld%s}",
+			 ok ? "true,\"expiresAt\":" : "false",
+			 ok ? "" : "",
+			 ok ? (long)expires : 0L,
+			 ok ? "" : "");
+		if (!ok)
+			strcpy(b, "{\"authenticated\":false}");
+		json(c, 200, b, NULL);
+		return 1;
+	}
+	if (eq(m->uri, "/api/auth/pair")) {
+		pair(c, m);
+		return 1;
+	}
+	if (eq(m->uri, "/api/auth/logout")) {
+		if (!eq(m->method, "POST") || !auth_origin_ok(m)) {
+			failure(c, 403, "Request rejected");
+			return 1;
+		}
+		clear_current(m);
+		json(c,
+		     200,
+		     "{\"ok\":true}",
+		     "Set-Cookie: sb_session=; Max-Age=0; Path=/; HttpOnly; "
+		     "SameSite=Strict\r\n");
+		return 1;
+	}
+	if (eq(m->uri, "/api/auth/revoke-all")) {
+		if (!auth_session_ok(m, NULL) || !eq(m->method, "POST") ||
+		    !auth_origin_ok(m)) {
+			failure(c, 403, "Request rejected");
+			return 1;
+		}
+		auth_revoke_all();
+		json(c,
+		     200,
+		     "{\"ok\":true}",
+		     "Set-Cookie: sb_session=; Max-Age=0; Path=/; HttpOnly; "
+		     "SameSite=Strict\r\n");
+		return 1;
+	}
+	failure(c, 404, "Authentication endpoint not found");
+	return 1;
+}

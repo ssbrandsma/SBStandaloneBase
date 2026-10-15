@@ -8,6 +8,8 @@
 #include "remote.h"
 #include "radio_stations.h"
 #include "auth.h"
+#include "logs.h"
+#include "monitor.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,34 +18,733 @@
 
 #define UPLOAD_SLOTS 4
 #define PREAMBLE_LIMIT 4096
-typedef struct {unsigned long id;FILE*f;size_t received;int active,started;char tmp[700],boundary[160],pre[PREAMBLE_LIMIT];size_t prelen;RepoApplet item;} Upload;
-typedef struct {const char*root;Upload uploads[UPLOAD_SLOTS];} Server;
-static int is(struct mg_str a,const char*b){return a.len==strlen(b)&&!memcmp(a.buf,b,a.len);}
-static void reply(struct mg_connection*c,int code,const char*b){mg_http_reply(c,code,"Content-Type: application/json\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n","%s",b);}
-static void error(struct mg_connection*c,int code,const char*m){char b[700];size_t u=snprintf(b,sizeof b,"{\"error\":\"");for(;*m&&u+3<sizeof b;m++){if(*m=='\"'||*m=='\\')b[u++]='\\';if((unsigned char)*m>=32)b[u++]=*m;}snprintf(b+u,sizeof b-u,"\"}");reply(c,code,b);}
-static void copystr(struct mg_str s,char*out,size_t n){size_t z=s.len<n-1?s.len:n-1;memcpy(out,s.buf,z);out[z]=0;}
-static void jf(struct mg_str b,const char*k,char*out,size_t n){char p[80],*v;snprintf(p,sizeof p,"$.%s",k);v=mg_json_get_str(b,p);if(v){snprintf(out,n,"%s",v);free(v);}else out[0]=0;}
-static void item_json(struct mg_str b,RepoApplet*i){memset(i,0,sizeof*i);jf(b,"name",i->name,sizeof i->name);jf(b,"title",i->title,sizeof i->title);jf(b,"version",i->version,sizeof i->version);jf(b,"target",i->target,sizeof i->target);jf(b,"min_target_version",i->min_target_version,sizeof i->min_target_version);jf(b,"url",i->url,sizeof i->url);jf(b,"sha",i->sha,sizeof i->sha);jf(b,"desc",i->desc,sizeof i->desc);jf(b,"changes",i->changes,sizeof i->changes);jf(b,"creator",i->creator,sizeof i->creator);jf(b,"email",i->email,sizeof i->email);}
-static int q(struct mg_http_message*m,const char*k,char*out,size_t n){return mg_http_get_var(&m->query,k,out,n)>0;}
-static void item_query(struct mg_http_message*m,RepoApplet*i){memset(i,0,sizeof*i);q(m,"name",i->name,sizeof i->name);q(m,"title",i->title,sizeof i->title);q(m,"version",i->version,sizeof i->version);q(m,"target",i->target,sizeof i->target);q(m,"min_target_version",i->min_target_version,sizeof i->min_target_version);q(m,"desc",i->desc,sizeof i->desc);q(m,"changes",i->changes,sizeof i->changes);q(m,"creator",i->creator,sizeof i->creator);q(m,"email",i->email,sizeof i->email);}
-static int writable(Server*s,struct mg_connection*c,struct mg_http_message*m){Settings x;(void)s;settings_load(&x);if(x.readonly){error(c,403,"Web management is read-only");return 0;}if(!auth_origin_ok(m)){error(c,403,"Cross-origin write rejected");return 0;}if(!auth_session_ok(m,NULL)){error(c,401,"Browser session required");return 0;}return 1;}
-static int radio_auth(Server*s,struct mg_connection*c,struct mg_http_message*m){if(!auth_session_ok(m,NULL)){error(c,401,"Browser session required");return 0;}if(!is(m->method,"GET")&&!writable(s,c,m))return 0;return 1;}
-static Upload*up(Server*s,unsigned long id,int create){Upload*slot=NULL;for(int i=0;i<UPLOAD_SLOTS;i++){if(s->uploads[i].active&&s->uploads[i].id==id)return&s->uploads[i];if(!s->uploads[i].active&&!slot)slot=&s->uploads[i];}if(create&&slot){memset(slot,0,sizeof*slot);slot->active=1;slot->id=id;}return create?slot:NULL;}
-static void upclear(Upload*u){if(!u)return;if(u->f)fclose(u->f);if(u->tmp[0])unlink(u->tmp);memset(u,0,sizeof*u);}
-static const unsigned char*findb(const unsigned char*b,size_t n,const char*p,size_t z){if(z>n)return NULL;for(size_t i=0;i+z<=n;i++)if(!memcmp(b+i,p,z))return b+i;return NULL;}
-static int filewrite(Upload*u,const void*b,size_t n){if(u->received+n>REPO_MAX_UPLOAD)return-2;if(n&&fwrite(b,1,n,u->f)!=n)return-1;u->received+=n;return 0;}
-static void finish(Server*s,struct mg_connection*c,Upload*u){char e[256]={0};if(fflush(u->f)
+
+typedef struct {
+	unsigned long id;
+	FILE *f;
+	size_t received;
+	int active, started;
+	char tmp[700], boundary[160], pre[PREAMBLE_LIMIT];
+	size_t prelen;
+	RepoApplet item;
+} Upload;
+
+typedef struct {
+	const char *root;
+	Upload uploads[UPLOAD_SLOTS];
+} Server;
+
+/**
+ * @brief Handle is.
+ * @param a Input value for a.
+ * @param b Input text for b.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+static int is(struct mg_str a, const char *b)
+{
+	return a.len == strlen(b) && !memcmp(a.buf, b, a.len);
+}
+
+/**
+ * @brief Send an HTTP response with the supplied body.
+ * @param c Mongoose connection handling the request.
+ * @param code Status or response code.
+ * @param b Input text for b.
+ */
+static void reply(struct mg_connection *c, int code, const char *b)
+{
+	mg_http_reply(c,
+		      code,
+		      "Content-Type: application/json\r\nCache-Control: "
+		      "no-store\r\nX-Content-Type-Options: "
+		      "nosniff\r\nReferrer-Policy: no-referrer\r\nConnection: "
+		      "close\r\n",
+		      "%s",
+		      b);
+}
+
+/**
+ * @brief Handle error.
+ * @param c Mongoose connection handling the request.
+ * @param code Status or response code.
+ * @param m Input text for m.
+ */
+static void error(struct mg_connection *c, int code, const char *m)
+{
+	char b[700];
+	size_t u = snprintf(b, sizeof b, "{\"error\":\"");
+	for (; *m && u + 3 < sizeof b; m++) {
+		if (*m == '\"' || *m == '\\')
+			b[u++] = '\\';
+		if ((unsigned char)*m >= 32)
+			b[u++] = *m;
+	}
+	snprintf(b + u, sizeof b - u, "\"}");
+	reply(c, code, b);
+}
+
+/**
+ * @brief Handle copystr.
+ * @param s Input value for s.
+ * @param out Destination buffer for the result.
+ * @param n Capacity or item count associated with the operation.
+ */
+static void copystr(struct mg_str s, char *out, size_t n)
+{
+	size_t z = s.len < n - 1 ? s.len : n - 1;
+	memcpy(out, s.buf, z);
+	out[z] = 0;
+}
+
+/**
+ * @brief Handle jf.
+ * @param b Input value for b.
+ * @param k Input text for k.
+ * @param out Destination buffer for the result.
+ * @param n Capacity or item count associated with the operation.
+ */
+static void jf(struct mg_str b, const char *k, char *out, size_t n)
+{
+	char p[80], *v;
+	snprintf(p, sizeof p, "$.%s", k);
+	v = mg_json_get_str(b, p);
+	if (v) {
+		snprintf(out, n, "%s", v);
+		free(v);
+	} else
+		out[0] = 0;
+}
+
+/**
+ * @brief Handle item json.
+ * @param b Input value for b.
+ * @param i Object referenced by i.
+ */
+static void item_json(struct mg_str b, RepoApplet *i)
+{
+	memset(i, 0, sizeof *i);
+	jf(b, "name", i->name, sizeof i->name);
+	jf(b, "title", i->title, sizeof i->title);
+	jf(b, "version", i->version, sizeof i->version);
+	jf(b, "target", i->target, sizeof i->target);
+	jf(b,
+	   "min_target_version",
+	   i->min_target_version,
+	   sizeof i->min_target_version);
+	jf(b, "url", i->url, sizeof i->url);
+	jf(b, "sha", i->sha, sizeof i->sha);
+	jf(b, "desc", i->desc, sizeof i->desc);
+	jf(b, "changes", i->changes, sizeof i->changes);
+	jf(b, "creator", i->creator, sizeof i->creator);
+	jf(b, "email", i->email, sizeof i->email);
+}
+
+/**
+ * @brief Handle q.
+ * @param m HTTP request message.
+ * @param k Input text for k.
+ * @param out Destination buffer for the result.
+ * @param n Capacity or item count associated with the operation.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+static int q(struct mg_http_message *m, const char *k, char *out, size_t n)
+{
+	return mg_http_get_var(&m->query, k, out, n) > 0;
+}
+
+/**
+ * @brief Handle item query.
+ * @param m HTTP request message.
+ * @param i Object referenced by i.
+ */
+static void item_query(struct mg_http_message *m, RepoApplet *i)
+{
+	memset(i, 0, sizeof *i);
+	q(m, "name", i->name, sizeof i->name);
+	q(m, "title", i->title, sizeof i->title);
+	q(m, "version", i->version, sizeof i->version);
+	q(m, "target", i->target, sizeof i->target);
+	q(m,
+	  "min_target_version",
+	  i->min_target_version,
+	  sizeof i->min_target_version);
+	q(m, "desc", i->desc, sizeof i->desc);
+	q(m, "changes", i->changes, sizeof i->changes);
+	q(m, "creator", i->creator, sizeof i->creator);
+	q(m, "email", i->email, sizeof i->email);
+}
+
+/**
+ * @brief Handle writable.
+ * @param s Object referenced by s.
+ * @param c Mongoose connection handling the request.
+ * @param m HTTP request message.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+static int
+writable(Server *s, struct mg_connection *c, struct mg_http_message *m)
+{
+	Settings x;
+	(void)s;
+	settings_load(&x);
+	if (x.readonly) {
+		error(c, 403, "Web management is read-only");
+		return 0;
+	}
+	if (!auth_origin_ok(m)) {
+		error(c, 403, "Cross-origin write rejected");
+		return 0;
+	}
+	if (!auth_session_ok(m, NULL)) {
+		error(c, 401, "Browser session required");
+		return 0;
+	}
+	return 1;
+}
+
+/**
+ * @brief Handle radio auth.
+ * @param s Object referenced by s.
+ * @param c Mongoose connection handling the request.
+ * @param m HTTP request message.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+static int
+radio_auth(Server *s, struct mg_connection *c, struct mg_http_message *m)
+{
+	if (!auth_session_ok(m, NULL)) {
+		error(c, 401, "Browser session required");
+		return 0;
+	}
+	if (!is(m->method, "GET") && !writable(s, c, m))
+		return 0;
+	return 1;
+}
+
+/**
+ * @brief Handle up.
+ * @param s Object referenced by s.
+ * @param id Identifier of the requested item.
+ * @param create Numeric value for create.
+ * @return Pointer to the requested object, or `NULL` when unavailable.
+ */
+static Upload *up(Server *s, unsigned long id, int create)
+{
+	Upload *slot = NULL;
+	for (int i = 0; i < UPLOAD_SLOTS; i++) {
+		if (s->uploads[i].active && s->uploads[i].id == id)
+			return &s->uploads[i];
+		if (!s->uploads[i].active && !slot)
+			slot = &s->uploads[i];
+	}
+	if (create && slot) {
+		memset(slot, 0, sizeof *slot);
+		slot->active = 1;
+		slot->id = id;
+	}
+	return create ? slot : NULL;
+}
+
+/**
+ * @brief Handle upclear.
+ * @param u Object referenced by u.
+ */
+static void upclear(Upload *u)
+{
+	if (!u)
+		return;
+	if (u->f)
+		fclose(u->f);
+	if (u->tmp[0])
+		unlink(u->tmp);
+	memset(u, 0, sizeof *u);
+}
+
+/**
+ * @brief Handle findb.
+ * @param b Input text for b.
+ * @param n Capacity or item count associated with the operation.
+ * @param p Input text for p.
+ * @param z Size or count for z.
+ * @return Pointer to the requested object, or `NULL` when unavailable.
+ */
+static const unsigned char *
+findb(const unsigned char *b, size_t n, const char *p, size_t z)
+{
+	if (z > n)
+		return NULL;
+	for (size_t i = 0; i + z <= n; i++)
+		if (!memcmp(b + i, p, z))
+			return b + i;
+	return NULL;
+}
+
+/**
+ * @brief Handle filewrite.
+ * @param u Object referenced by u.
+ * @param b Object referenced by b.
+ * @param n Capacity or item count associated with the operation.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+static int filewrite(Upload *u, const void *b, size_t n)
+{
+	if (u->received + n > REPO_MAX_UPLOAD)
+		return -2;
+	if (n && fwrite(b, 1, n, u->f) != n)
+		return -1;
+	u->received += n;
+	return 0;
+}
+
+/**
+ * @brief Handle finish.
+ * @param s Object referenced by s.
+ * @param c Mongoose connection handling the request.
+ * @param u Object referenced by u.
+ */
+static void finish(Server *s, struct mg_connection *c, Upload *u)
+{
+	char e[256] = {0};
+	if (fflush(u->f)
 #ifndef _WIN32
-||fsync(fileno(u->f))
+	    || fsync(fileno(u->f))
 #endif
-||fclose(u->f)){u->f=NULL;error(c,500,"Failed to flush uploaded package");upclear(u);return;}u->f=NULL;if(!u->received){error(c,400,"Uploaded package is empty");upclear(u);return;}if(repo_commit_upload(u->tmp,&u->item,e,sizeof e)){error(c,strstr(e,"already exists")?409:400,e);upclear(u);return;}u->tmp[0]=0;reply(c,201,"{\"ok\":true,\"message\":\"Package added to the Logitech Applet Installer catalog\"}");memset(u,0,sizeof*u);(void)s;}
-static void consume(Server*s,struct mg_connection*c,Upload*u){size_t keep=strlen(u->boundary)+8;if(!u->started){const unsigned char*end=findb(c->recv.buf,c->recv.len,"\r\n\r\n",4);size_t header;if(!end){if(c->recv.len<PREAMBLE_LIMIT)return;error(c,400,"Multipart header is too large");upclear(u);c->is_draining=1;return;}header=(size_t)(end-c->recv.buf)+4;if(header>=sizeof u->pre){error(c,400,"Multipart header is too large");upclear(u);c->is_draining=1;return;}memcpy(u->pre,c->recv.buf,header);u->pre[header]=0;if(strncmp(u->pre,u->boundary,strlen(u->boundary))||!strstr(u->pre,"name=\"package\"")||!strstr(u->pre,"filename=\"")){error(c,400,"Multipart request must contain one package file");upclear(u);c->is_draining=1;return;}mg_iobuf_del(&c->recv,0,header);u->started=1;}
- char d[180];snprintf(d,sizeof d,"\r\n%s--\r\n",u->boundary);const unsigned char*at=findb(c->recv.buf,c->recv.len,d,strlen(d));if(at){int rc=filewrite(u,c->recv.buf,(size_t)(at-c->recv.buf));mg_iobuf_del(&c->recv,0,c->recv.len);if(rc){error(c,rc==-2?413:507,rc==-2?"Package exceeds upload limit":"Package write failed");upclear(u);}else finish(s,c,u);return;}if(c->recv.len>keep){size_t n=c->recv.len-keep;int rc=filewrite(u,c->recv.buf,n);mg_iobuf_del(&c->recv,0,n);if(rc){error(c,rc==-2?413:507,rc==-2?"Package exceeds upload limit":"Package write failed");upclear(u);c->is_draining=1;}}}
-static int start(Server*s,struct mg_connection*c,struct mg_http_message*m){char ctbuf[256],why[160],path[700];struct mg_str*ct,*cl;Upload*u;long long length;if(!writable(s,c,m))return-1;if(!repo_storage_ready(why,sizeof why)){error(c,507,why);return-1;}ct=mg_http_get_header(m,"Content-Type");cl=mg_http_get_header(m,"Content-Length");if(!ct||!cl){error(c,411,"Content-Length and multipart Content-Type are required");return-1;}copystr(*ct,ctbuf,sizeof ctbuf);char*b=strstr(ctbuf,"boundary=");if(!b||strlen(b+9)<4||strlen(b+9)>140){error(c,400,"Invalid multipart boundary");return-1;}char lb[32];copystr(*cl,lb,sizeof lb);length=strtoll(lb,NULL,10);if(length<=0||(unsigned long long)length>REPO_MAX_UPLOAD+PREAMBLE_LIMIT){error(c,413,"Upload exceeds 16 MiB limit");return-1;}u=up(s,c->id,1);if(!u){error(c,503,"Too many concurrent uploads");return-1;}item_query(m,&u->item);if(!u->item.target[0])snprintf(u->item.target,sizeof u->item.target,"baby");if(!u->item.min_target_version[0])snprintf(u->item.min_target_version,sizeof u->item.min_target_version,"7.7");snprintf(u->boundary,sizeof u->boundary,"--%s",b+9);snprintf(path,sizeof path,"%s/tmp/upload-%lu-XXXXXX",repo_root(),c->id);int fd=mkstemp(path);if(fd<0){error(c,507,"Cannot create upload temporary file");upclear(u);return-1;}chmod(path,0600);u->f=fdopen(fd,"wb");if(!u->f){close(fd);unlink(path);error(c,500,"Cannot open upload temporary file");upclear(u);return-1;}snprintf(u->tmp,sizeof u->tmp,"%s",path);mg_iobuf_del(&c->recv,0,m->head.len);c->pfn=NULL;return 0;}
-static int tail(struct mg_str uri,const char*prefix,char*out,size_t n){size_t z=strlen(prefix),l;if(uri.len<=z||memcmp(uri.buf,prefix,z))return 0;l=uri.len-z;if(l>=n)return 0;memcpy(out,uri.buf+z,l);out[l]=0;return 1;}
-static void normal(Server*s,struct mg_connection*c,struct mg_http_message*m){char b[65536],name[160],e[256];Settings x;int protected_route;settings_load(&x);if(auth_is_endpoint(m->uri)){auth_handle(c,m,remote_internal_authorized(c,m));return;}if(is(m->uri,"/api/remote/actions")){remote_handle(c,m,x.readonly);return;}protected_route=(m->uri.len>=5&&!memcmp(m->uri.buf,"/api/",5))||is(m->uri,"/system-information")||is(m->uri,"/overview-information")||is(m->uri,"/installed-applets")||is(m->uri,"/webserver-settings")||(m->uri.len>=18&&!memcmp(m->uri.buf,"/applets/packages/",18));if(protected_route&&!auth_session_ok(m,NULL)){error(c,401,"Browser pairing required");return;}if(remote_handle(c,m,x.readonly))return;if(radio_is_api(m->uri)){if(radio_auth(s,c,m))radio_handle(c,m);return;}if(is(m->uri,"/api/applets")&&is(m->method,"GET")){if(repo_list_json(b,sizeof b))error(c,500,"Cannot load catalog");else reply(c,200,b);return;}if(tail(m->uri,"/api/applets/",name,sizeof name)){if(!writable(s,c,m))return;if(is(m->method,"PUT")){RepoApplet i;item_json(m->body,&i);if(strcmp(i.name,name)){error(c,400,"URL name and metadata name differ");return;}if(repo_validate_metadata(&i,!repo_is_local_url(i.url),e,sizeof e)||repo_save_applet(&i,1,e,sizeof e)){error(c,400,e);return;}reply(c,200,"{\"ok\":true}");return;}if(is(m->method,"DELETE")){char z[8];int del=q(m,"delete_package",z,sizeof z)&&!strcmp(z,"1");if(repo_remove_applet(name,del,e,sizeof e)){error(c,400,e);return;}reply(c,200,"{\"ok\":true}");return;}}
- if(tail(m->uri,"/applets/packages/",name,sizeof name)&&(is(m->method,"GET")||is(m->method,"HEAD"))){char path[800];if(repo_package_path(name,path,sizeof path)||access(path,R_OK)){error(c,404,"Package not found");return;}struct mg_http_serve_opts o={0};o.extra_headers="Content-Type: application/zip\r\nContent-Disposition: attachment\r\nX-Content-Type-Options: nosniff\r\n";mg_http_serve_file(c,m,path,&o);return;}
- if(is(m->uri,"/system-information")||is(m->uri,"/overview-information")){system_json(b,sizeof b);reply(c,200,b);return;}if(is(m->uri,"/installed-applets")){applets_json(b,sizeof b);reply(c,200,b);return;}if(is(m->uri,"/webserver-settings")){if(is(m->method,"GET")){snprintf(b,sizeof b,"{\"port\":%d,\"enabled\":%s,\"autostart\":%s,\"readonly\":%s,\"name\":\"%s\"}",x.port,x.enabled?"true":"false",x.autostart?"true":"false",x.readonly?"true":"false",x.name);reply(c,200,b);return;}if(is(m->method,"PUT")){if(!writable(s,c,m))return;double port;bool v;char*n;if(mg_json_get_num(m->body,"$.port",&port))x.port=(int)port;if(mg_json_get_bool(m->body,"$.readonly",&v))x.readonly=v;n=mg_json_get_str(m->body,"$.name");if(n){snprintf(x.name,sizeof x.name,"%s",n);free(n);}if(x.port<1||x.port>65535||settings_save(&x)){error(c,400,"Invalid settings or write failure");return;}reply(c,200,"{\"ok\":true}");return;}}
- struct mg_http_serve_opts o={.root_dir=s->root?s->root:"web"};if(is(m->uri,"/remote")){char p[700];snprintf(p,sizeof p,"%s/index.html",o.root_dir);mg_http_serve_file(c,m,p,&o);}else mg_http_serve_dir(c,m,&o);}
-static void fn(struct mg_connection*c,int ev,void*data){Server*s=c->fn_data;Upload*u=up(s,c->id,0);if(ev==MG_EV_HTTP_HDRS){struct mg_http_message*m=data;if(is(m->uri,"/api/applets/upload")&&is(m->method,"POST"))start(s,c,m);else if(is(m->uri,"/api/radio/logos")&&is(m->method,"POST")){struct mg_str*cl=mg_http_get_header(m,"Content-Length");char z[32];if(!cl){error(c,411,"Content-Length is required");c->is_draining=1;}else{copystr(*cl,z,sizeof z);if(strtoull(z,NULL,10)>1024u*1024u+8192u){error(c,413,"Logo upload exceeds 1 MiB limit");c->is_draining=1;}}}}else if(ev==MG_EV_HTTP_MSG){struct mg_http_message*m=data;if(!(is(m->uri,"/api/applets/upload")&&is(m->method,"POST"))&&!c->is_draining)normal(s,c,m);}else if(ev==MG_EV_READ&&u)consume(s,c,u);else if(ev==MG_EV_CLOSE&&u)upclear(u);}
-int http_server_run(int port,const char*root){char url[64];const char*d=getenv("SBWEBSERVER_CONFIG_DIR");Server s;memset(&s,0,sizeof s);s.root=root;auth_init();remote_init(d);snprintf(url,sizeof url,"http://0.0.0.0:%d",port);struct mg_mgr mgr;mg_mgr_init(&mgr);if(!mg_http_listen(&mgr,url,fn,&s)){fprintf(stderr,"Cannot listen on %s\n",url);remote_free();auth_free();return 1;}for(;;){mg_mgr_poll(&mgr,100);remote_tick();}}
+	    || fclose(u->f)) {
+		u->f = NULL;
+		error(c, 500, "Failed to flush uploaded package");
+		upclear(u);
+		return;
+	}
+	u->f = NULL;
+	if (!u->received) {
+		error(c, 400, "Uploaded package is empty");
+		upclear(u);
+		return;
+	}
+	if (repo_commit_upload(u->tmp, &u->item, e, sizeof e)) {
+		error(c, strstr(e, "already exists") ? 409 : 400, e);
+		upclear(u);
+		return;
+	}
+	u->tmp[0] = 0;
+	reply(c,
+	      201,
+	      "{\"ok\":true,\"message\":\"Package added to the Logitech Applet "
+	      "Installer catalog\"}");
+	memset(u, 0, sizeof *u);
+	(void)s;
+}
+
+/**
+ * @brief Handle consume.
+ * @param s Object referenced by s.
+ * @param c Mongoose connection handling the request.
+ * @param u Object referenced by u.
+ */
+static void consume(Server *s, struct mg_connection *c, Upload *u)
+{
+	size_t keep = strlen(u->boundary) + 8;
+	if (!u->started) {
+		const unsigned char *end =
+			findb(c->recv.buf, c->recv.len, "\r\n\r\n", 4);
+		size_t header;
+		if (!end) {
+			if (c->recv.len < PREAMBLE_LIMIT)
+				return;
+			error(c, 400, "Multipart header is too large");
+			upclear(u);
+			c->is_draining = 1;
+			return;
+		}
+		header = (size_t)(end - c->recv.buf) + 4;
+		if (header >= sizeof u->pre) {
+			error(c, 400, "Multipart header is too large");
+			upclear(u);
+			c->is_draining = 1;
+			return;
+		}
+		memcpy(u->pre, c->recv.buf, header);
+		u->pre[header] = 0;
+		if (strncmp(u->pre, u->boundary, strlen(u->boundary)) ||
+		    !strstr(u->pre, "name=\"package\"") ||
+		    !strstr(u->pre, "filename=\"")) {
+			error(c,
+			      400,
+			      "Multipart request must contain one package "
+			      "file");
+			upclear(u);
+			c->is_draining = 1;
+			return;
+		}
+		mg_iobuf_del(&c->recv, 0, header);
+		u->started = 1;
+	}
+	char d[180];
+	snprintf(d, sizeof d, "\r\n%s--\r\n", u->boundary);
+	const unsigned char *at = findb(c->recv.buf, c->recv.len, d, strlen(d));
+	if (at) {
+		int rc = filewrite(u, c->recv.buf, (size_t)(at - c->recv.buf));
+		mg_iobuf_del(&c->recv, 0, c->recv.len);
+		if (rc) {
+			error(c,
+			      rc == -2 ? 413 : 507,
+			      rc == -2 ? "Package exceeds upload limit"
+				       : "Package write failed");
+			upclear(u);
+		} else
+			finish(s, c, u);
+		return;
+	}
+	if (c->recv.len > keep) {
+		size_t n = c->recv.len - keep;
+		int rc = filewrite(u, c->recv.buf, n);
+		mg_iobuf_del(&c->recv, 0, n);
+		if (rc) {
+			error(c,
+			      rc == -2 ? 413 : 507,
+			      rc == -2 ? "Package exceeds upload limit"
+				       : "Package write failed");
+			upclear(u);
+			c->is_draining = 1;
+		}
+	}
+}
+
+/**
+ * @brief Handle start.
+ * @param s Object referenced by s.
+ * @param c Mongoose connection handling the request.
+ * @param m HTTP request message.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+static int start(Server *s, struct mg_connection *c, struct mg_http_message *m)
+{
+	char ctbuf[256], why[160], path[700];
+	struct mg_str *ct, *cl;
+	Upload *u;
+	long long length;
+	size_t limit;
+	if (!writable(s, c, m))
+		return -1;
+	if (!repo_storage_ready(why, sizeof why)) {
+		error(c, 507, why);
+		return -1;
+	}
+	limit = repo_upload_limit();
+	ct = mg_http_get_header(m, "Content-Type");
+	cl = mg_http_get_header(m, "Content-Length");
+	if (!ct || !cl) {
+		error(c,
+		      411,
+		      "Content-Length and multipart Content-Type are required");
+		return -1;
+	}
+	copystr(*ct, ctbuf, sizeof ctbuf);
+	char *b = strstr(ctbuf, "boundary=");
+	if (!b || strlen(b + 9) < 4 || strlen(b + 9) > 140) {
+		error(c, 400, "Invalid multipart boundary");
+		return -1;
+	}
+	char lb[32];
+	copystr(*cl, lb, sizeof lb);
+	length = strtoll(lb, NULL, 10);
+	if (length <= 0 ||
+	    (unsigned long long)length > limit + PREAMBLE_LIMIT) {
+		error(c, 413, "Upload exceeds available repository storage");
+		return -1;
+	}
+	u = up(s, c->id, 1);
+	if (!u) {
+		error(c, 503, "Too many concurrent uploads");
+		return -1;
+	}
+	item_query(m, &u->item);
+	if (!u->item.target[0])
+		snprintf(u->item.target, sizeof u->item.target, "baby");
+	if (!u->item.min_target_version[0])
+		snprintf(u->item.min_target_version,
+			 sizeof u->item.min_target_version,
+			 "7.7");
+	snprintf(u->boundary, sizeof u->boundary, "--%s", b + 9);
+	snprintf(path,
+		 sizeof path,
+		 "%s/tmp/upload-%lu-XXXXXX",
+		 repo_root(),
+		 c->id);
+	int fd = mkstemp(path);
+	if (fd < 0) {
+		error(c, 507, "Cannot create upload temporary file");
+		upclear(u);
+		return -1;
+	}
+	chmod(path, 0600);
+	u->f = fdopen(fd, "wb");
+	if (!u->f) {
+		close(fd);
+		unlink(path);
+		error(c, 500, "Cannot open upload temporary file");
+		upclear(u);
+		return -1;
+	}
+	snprintf(u->tmp, sizeof u->tmp, "%s", path);
+	mg_iobuf_del(&c->recv, 0, m->head.len);
+	c->pfn = NULL;
+	return 0;
+}
+
+/**
+ * @brief Handle tail.
+ * @param uri Input value for uri.
+ * @param prefix Input text for prefix.
+ * @param out Destination buffer for the result.
+ * @param n Capacity or item count associated with the operation.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+static int tail(struct mg_str uri, const char *prefix, char *out, size_t n)
+{
+	size_t z = strlen(prefix), l;
+	if (uri.len <= z || memcmp(uri.buf, prefix, z))
+		return 0;
+	l = uri.len - z;
+	if (l >= n)
+		return 0;
+	memcpy(out, uri.buf + z, l);
+	out[l] = 0;
+	return 1;
+}
+
+/**
+ * @brief Handle normal.
+ * @param s Object referenced by s.
+ * @param c Mongoose connection handling the request.
+ * @param m HTTP request message.
+ */
+static void
+normal(Server *s, struct mg_connection *c, struct mg_http_message *m)
+{
+	char b[65536], name[160], e[256];
+	Settings x;
+	int protected_route;
+	settings_load(&x);
+	if (auth_is_endpoint(m->uri)) {
+		auth_handle(c, m, remote_internal_authorized(c, m));
+		return;
+	}
+	if (is(m->uri, "/api/remote/actions")) {
+		remote_handle(c, m, x.readonly);
+		return;
+	}
+	protected_route =
+		(m->uri.len >= 5 && !memcmp(m->uri.buf, "/api/", 5)) ||
+		is(m->uri, "/system-information") ||
+		is(m->uri, "/overview-information") ||
+		is(m->uri, "/installed-applets") ||
+		is(m->uri, "/webserver-settings") ||
+		(m->uri.len >= 18 &&
+		 !memcmp(m->uri.buf, "/applets/packages/", 18));
+	if (protected_route && !auth_session_ok(m, NULL)) {
+		error(c, 401, "Browser pairing required");
+		return;
+	}
+	if (remote_handle(c, m, x.readonly))
+		return;
+	if (logs_handle(c, m))
+		return;
+	if (monitor_handle(c, m))
+		return;
+	if (radio_is_api(m->uri)) {
+		if (radio_auth(s, c, m))
+			radio_handle(c, m);
+		return;
+	}
+	if (is(m->uri, "/api/applets") && is(m->method, "GET")) {
+		if (repo_list_json(b, sizeof b))
+			error(c, 500, "Cannot load catalog");
+		else
+			reply(c, 200, b);
+		return;
+	}
+	if (tail(m->uri, "/api/applets/", name, sizeof name)) {
+		if (!writable(s, c, m))
+			return;
+		if (is(m->method, "PUT")) {
+			RepoApplet i;
+			item_json(m->body, &i);
+			if (strcmp(i.name, name)) {
+				error(c,
+				      400,
+				      "URL name and metadata name differ");
+				return;
+			}
+			if (repo_validate_metadata(&i,
+						   !repo_is_local_url(i.url),
+						   e,
+						   sizeof e) ||
+			    repo_save_applet(&i, 1, e, sizeof e)) {
+				error(c, 400, e);
+				return;
+			}
+			reply(c, 200, "{\"ok\":true}");
+			return;
+		}
+		if (is(m->method, "DELETE")) {
+			char z[8];
+			int del = q(m, "delete_package", z, sizeof z) &&
+				  !strcmp(z, "1");
+			if (repo_remove_applet(name, del, e, sizeof e)) {
+				error(c, 400, e);
+				return;
+			}
+			reply(c, 200, "{\"ok\":true}");
+			return;
+		}
+	}
+	if (tail(m->uri, "/applets/packages/", name, sizeof name) &&
+	    (is(m->method, "GET") || is(m->method, "HEAD"))) {
+		char path[800];
+		if (repo_package_path(name, path, sizeof path) ||
+		    access(path, R_OK)) {
+			error(c, 404, "Package not found");
+			return;
+		}
+		struct mg_http_serve_opts o = {0};
+		o.extra_headers =
+			"Content-Type: application/zip\r\nContent-Disposition: "
+			"attachment\r\nX-Content-Type-Options: nosniff\r\n";
+		mg_http_serve_file(c, m, path, &o);
+		return;
+	}
+	if (is(m->uri, "/system-information") ||
+	    is(m->uri, "/overview-information")) {
+		system_json(b, sizeof b);
+		reply(c, 200, b);
+		return;
+	}
+	if (is(m->uri, "/installed-applets")) {
+		applets_json(b, sizeof b);
+		reply(c, 200, b);
+		return;
+	}
+	if (is(m->uri, "/webserver-settings")) {
+		if (is(m->method, "GET")) {
+			snprintf(b,
+				 sizeof b,
+				 "{\"port\":%d,\"enabled\":%s,\"autostart\":%s,"
+				 "\"readonly\":%s,\"name\":\"%s\"}",
+				 x.port,
+				 x.enabled ? "true" : "false",
+				 x.autostart ? "true" : "false",
+				 x.readonly ? "true" : "false",
+				 x.name);
+			reply(c, 200, b);
+			return;
+		}
+		if (is(m->method, "PUT")) {
+			if (!writable(s, c, m))
+				return;
+			double port;
+			bool v;
+			char *n;
+			if (mg_json_get_num(m->body, "$.port", &port))
+				x.port = (int)port;
+			if (mg_json_get_bool(m->body, "$.readonly", &v))
+				x.readonly = v;
+			n = mg_json_get_str(m->body, "$.name");
+			if (n) {
+				snprintf(x.name, sizeof x.name, "%s", n);
+				free(n);
+			}
+			if (x.port < 1 || x.port > 65535 || settings_save(&x)) {
+				error(c,
+				      400,
+				      "Invalid settings or write failure");
+				return;
+			}
+			reply(c, 200, "{\"ok\":true}");
+			return;
+		}
+	}
+	struct mg_http_serve_opts o = {.root_dir = s->root ? s->root : "web"};
+	if (is(m->uri, "/remote")) {
+		char p[700];
+		snprintf(p, sizeof p, "%s/index.html", o.root_dir);
+		mg_http_serve_file(c, m, p, &o);
+	} else
+		mg_http_serve_dir(c, m, &o);
+}
+
+/**
+ * @brief Handle fn.
+ * @param c Mongoose connection handling the request.
+ * @param ev Numeric value for ev.
+ * @param data Data supplied to the operation.
+ */
+static void fn(struct mg_connection *c, int ev, void *data)
+{
+	Server *s = c->fn_data;
+	Upload *u = up(s, c->id, 0);
+	if (ev == MG_EV_HTTP_HDRS) {
+		struct mg_http_message *m = data;
+		if (is(m->uri, "/api/applets/upload") && is(m->method, "POST"))
+			start(s, c, m);
+		else if (is(m->uri, "/api/radio/logos") &&
+			 is(m->method, "POST")) {
+			struct mg_str *cl =
+				mg_http_get_header(m, "Content-Length");
+			char z[32];
+			if (!cl) {
+				error(c, 411, "Content-Length is required");
+				c->is_draining = 1;
+			} else {
+				copystr(*cl, z, sizeof z);
+				if (strtoull(z, NULL, 10) >
+				    1024u * 1024u + 8192u) {
+					error(c,
+					      413,
+					      "Logo upload exceeds 1 MiB "
+					      "limit");
+					c->is_draining = 1;
+				}
+			}
+		}
+	} else if (ev == MG_EV_HTTP_MSG) {
+		struct mg_http_message *m = data;
+		if (!(is(m->uri, "/api/applets/upload") &&
+		      is(m->method, "POST")) &&
+		    !c->is_draining)
+			normal(s, c, m);
+	} else if (ev == MG_EV_READ && u)
+		consume(s, c, u);
+	else if (ev == MG_EV_CLOSE && u)
+		upclear(u);
+}
+
+/**
+ * @brief Handle http server run.
+ * @param port Network port number.
+ * @param root Root directory used by the operation.
+ * @return Zero on success; otherwise a nonzero status or error code.
+ */
+int http_server_run(int port, const char *root)
+{
+	char url[64];
+	const char *d = getenv("SBWEBSERVER_CONFIG_DIR");
+	Server s;
+	memset(&s, 0, sizeof s);
+	s.root = root;
+	auth_init();
+	remote_init(d);
+	snprintf(url, sizeof url, "http://0.0.0.0:%d", port);
+	struct mg_mgr mgr;
+	mg_mgr_init(&mgr);
+	if (!mg_http_listen(&mgr, url, fn, &s)) {
+		fprintf(stderr, "Cannot listen on %s\n", url);
+		remote_free();
+		auth_free();
+		return 1;
+	}
+	for (;;) {
+		mg_mgr_poll(&mgr, 100);
+		remote_tick();
+	}
+}

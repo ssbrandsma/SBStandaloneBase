@@ -1,0 +1,23 @@
+---
+BasedOnStyle: LLVM
+Language: Cpp
+UseTab: Always
+TabWidth: 8
+IndentWidth: 8
+ContinuationIndentWidth: 8
+ColumnLimit: 80
+BreakBeforeBraces: Linux
+AllowShortBlocksOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AlwaysBreakAfterReturnType: None
+BinPackArguments: false
+BinPackParameters: false
+IndentCaseLabels: false
+PointerAlignment: Right
+SeparateDefinitionBlocks: Always
+SortIncludes: false
+SpaceAfterCStyleCast: false
+...

@@ -226,7 +226,10 @@ def main() -> int:
         stage = candidate
         radio.upload(args.zip_file.resolve(), stage, "package.zip")
         qstage = shlex.quote(stage)
-        radio.run(f"mkdir {qstage}/files && unzip -q {qstage}/package.zip -d {qstage}/files")
+        # Old Dropbear connections can disappear after the command completed,
+        # causing Radio.run() to retry it. Keep extraction idempotent so a
+        # successful first attempt does not make the retry fail at mkdir.
+        radio.run(f"mkdir -p {qstage}/files && unzip -oq {qstage}/package.zip -d {qstage}/files")
         radio.run(
             f"chmod 755 {qstage}/files/sb-storage-helper && "
             f"{qstage}/files/sb-storage-helper verify-module {qstage}/files/sbubifs-authorized.ko && "

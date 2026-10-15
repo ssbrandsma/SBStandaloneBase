@@ -19,7 +19,7 @@ def main():
     with tempfile.TemporaryDirectory() as td:
         root = pathlib.Path(td); (root / "applets" / "StandaloneRadio").mkdir(parents=True); (root/"web").mkdir()
         port = 19000 + os.getpid() % 10000; base = f"http://127.0.0.1:{port}"
-        env = os.environ | {"SB_RADIO_CONFIG_ROOT": str(root / "radio"), "SB_APPLET_ROOTS": str(root / "applets")}
+        env = os.environ | {"SB_RADIO_INTERNAL_ROOT": str(root / "radio"), "SB_APPLET_ROOTS": str(root / "applets")}
         p = subprocess.Popen([exe, "--port", str(port), "--web-root", web, "--config-dir", str(root / "web")], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             for _ in range(50):

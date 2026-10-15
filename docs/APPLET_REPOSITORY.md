@@ -22,11 +22,17 @@ catalog.
 
 ## Storage and upload flow
 
-Local ZIPs are accepted only when `/mnt/sbdata` is mounted as `sbubifs`, or
-when `SB_REPOSITORY_ROOT` is explicitly set for host tests. The layout is:
+Local ZIPs prefer `/mnt/sbdata` when it is mounted as `sbubifs`. Before
+extended storage is enabled they use `/mnt/storage/standalonebase/applet-repository`.
+`SB_REPOSITORY_ROOT` and `SB_REPOSITORY_INTERNAL_ROOT` are explicit host-test
+overrides. The layouts are:
 
 ```text
 /mnt/sbdata/applet-repository/
+  packages/<Name>-<Version>.zip
+  tmp/upload-*
+
+/mnt/storage/standalonebase/applet-repository/
   packages/<Name>-<Version>.zip
   tmp/upload-*
 ```
@@ -37,10 +43,11 @@ headers and drains received bytes to a same-filesystem temporary file while
 retaining only a small boundary window. The complete ZIP is never held in
 RAM. Disconnects and errors close and unlink the temporary file.
 
-Limits are 16 MiB compressed, 512 entries, 64 MiB total uncompressed content,
-and a maximum compression ratio of 200:1 per entry. Before an upload starts,
-the server requires at least the upload limit plus 1 MiB to be available on
-extended storage. The original small overlay is never an upload fallback.
+Limits are at most 16 MiB compressed, 512 entries, 64 MiB total uncompressed
+content, and a maximum compression ratio of 200:1 per entry. The effective
+compressed upload limit is reduced to the currently available capacity minus
+a protected 1 MiB free-space reserve. This makes the internal fallback safe
+on the factory volume while allowing the full limit on extended storage.
 
 Validation parses the EOCD, central directory and local-header bounds without
 extracting or executing Lua. It rejects encryption, unsupported compression,
