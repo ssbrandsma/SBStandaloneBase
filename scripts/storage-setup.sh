@@ -110,6 +110,20 @@ virgin_layout_exact() {
     esac
 }
 
+# Existing-volume recovery is separate from initialization. In particular,
+# available free LEBs are irrelevant: no UBI allocation or image write occurs.
+recovery_eligible() {
+    exact_sbdata && test -z "$(mounted_type "$SOURCE")" \
+        && test ! -f "$REBOOT_MARKER" \
+        && test "$(mounted_type "$ROOT/mnt/storage")" = ubifs \
+        && test "$(value "$ROOT/proc/sys/kernel/osrelease")" = 2.6.26.8-rt16 \
+        && grep -Eq 'Hardware[[:space:]]*:[[:space:]]*(Baby|Logitech MX25 Baby Board)' "$ROOT/proc/cpuinfo" \
+        && test -d "$SOURCE/SetupAppletInstaller" \
+        && test -d "$SOURCE/StandaloneBase" \
+        && test -x "$HELPER" \
+        && "$HELPER" verify-module "$BUNDLED_MODULE" >/dev/null 2>&1
+}
+
 status_snapshot() {
     platform=$(value "$ROOT/proc/cpuinfo" | sed 's/^[^:]*:[[:space:]]*//')
     kernel=$(value "$ROOT/proc/sys/kernel/osrelease")
@@ -184,6 +198,7 @@ status_snapshot() {
     say "AVAILABLE=$(test "$state" = AVAILABLE && echo 1 || echo 0)"
     say "INITIALIZATION_SUPPORTED=$init_supported"
     say "INITIALIZATION_REASON=$init_reason"
+    say "RECOVERY_SUPPORTED=$(bool recovery_eligible)"
 }
 
 stage() {
@@ -231,6 +246,9 @@ install_rcs_hook() {
 
 initialize() {
     supplied=$1
+    operation_lock=$ROOT/tmp/sbstorage-operation.lock
+    mkdir "$operation_lock" 2>/dev/null || { say ERROR=storage_operation_busy; exit 20; }
+    trap 'rmdir "$operation_lock" 2>/dev/null || true' EXIT
     : >"$LOG_FILE" || exit 27
     stage CHECKING_SYSTEM
     test -d "$UBI" || die 20 unsupported_system_or_layout
@@ -348,8 +366,131 @@ mount_existing() {
     status_snapshot
 }
 
+# Known firmware applets must never survive solely from the old firmware tree.
+# Current firmware directories additionally take precedence below. Everything
+# else is treated as a third-party applet and retained, including local caches.
+firmware_applet() {
+    case $1 in
+        JogglerSkin|Linux|QVGA240squareSkin|QVGAportraitSkin|WQVGAlargeSkin|WQVGAsmallSkin) return 0 ;;
+        AboutJive|AlarmSnooze|BlankScreen|ChooseMusicSource|Clock|CrashLog|CustomizeHomeMenu|DebugSkin|DebugTouch|Demo|Diagnostics|Experiments|HttpAuth|ImageViewer|InfoBrowser|LineIn|LogSettings|MacroPlay|NowPlaying|Playback|QVGAbaseSkin|QVGAlandscapeSkin|ScreenSavers|Screenshot|SelectPlayer|SelectSkin|SetupAppletInstaller|SetupDateTime|SetupFactoryReset|SetupFirmwareUpgrade|SetupLanguage|SetupNetTest|SetupNetworking|SetupSSH|SetupSoundEffects|SetupSqueezebox|SetupTZ|SetupWallpaper|SetupWelcome|SetupWifiRobustness|Shortcuts|SlimBrowser|SlimDiscovery|SlimMenus|Squeezebox|SqueezeboxBaby|TestAmbient|TestAudioRouting|TestDisplay|TestKeypad|TestTones|UdapControl|Spotify|SqueezeNetworkPIN) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+recover_existing() (
+    # A subshell confines the cleanup trap and lock to this transaction.
+    recovery_eligible || { status_snapshot; exit 0; }
+    lock=$ROOT/tmp/sbstorage-operation.lock
+    mkdir "$lock" 2>/dev/null || exit 0
+    recovery_mount=0
+    cleanup_recovery() {
+        test "$recovery_mount" = 0 || umount "$MOUNT" >>"$LOG_FILE" 2>&1 || true
+        rmdir "$lock" 2>/dev/null || true
+    }
+    trap cleanup_recovery EXIT
+    trap 'exit 1' HUP INT TERM
+    : >"$LOG_FILE" || exit 27
+    stage CHECKING_SYSTEM
+    # Recheck after acquiring the lock; refuse foreign mounts or pending work.
+    recovery_eligible || die 20 recovery_preconditions_changed
+    test -z "$(mounted_type "$MOUNT")" || die 20 recovery_volume_already_mounted
+    test -f "$ROOT/etc/init.d/rcS" || die 27 recovery_rcs_missing
+    /bin/sh -n "$ROOT/etc/init.d/rcS" || die 27 recovery_rcs_invalid
+    if ! grep -q 'rcS.local' "$ROOT/etc/init.d/rcS"; then
+        test "$(grep -c '^/etc/init.d/squeezeplay start$' "$ROOT/etc/init.d/rcS")" = 1 \
+            || die 27 recovery_rcs_requires_review
+    fi
+    stage LOADING_DRIVER
+    if ! has_fs; then
+        insmod "$BUNDLED_MODULE" >>"$LOG_FILE" 2>&1 || die 22 recovery_module_incompatible
+    fi
+    has_fs || die 22 recovery_filesystem_not_registered
+    stage MOUNTING
+    mkdir -p "$MOUNT" || die 24 recovery_mountpoint_failure
+    mount -t sbubifs -o ro ubi0:sbdata "$MOUNT" >>"$LOG_FILE" 2>&1 || die 24 recovery_readonly_mount_failed
+    recovery_mount=1
+    test "$(mounted_type "$MOUNT")" = sbubifs || die 24 recovery_mount_identity_failed
+    test -d "$DEST/SetupAppletInstaller" && test -d "$DEST/StandaloneBase" \
+        && test ! -L "$DEST" || die 26 recovery_old_tree_invalid
+    # Keep interrupted transactions for manual review rather than guessing
+    # which tree is authoritative or deleting a previous backup.
+    for prior in "$MOUNT"/.firmware-recovery.*; do
+        test ! -e "$prior" || die 26 recovery_previous_transaction_requires_review
+    done
+    required=$(du -sk "$SOURCE" "$DEST" | awk '{n += $1} END {print n + 4096}')
+    free=$(df -Pk "$MOUNT" | awk 'NR==2 {print $4}')
+    number "$required" && number "$free" && test "$free" -ge "$required" \
+        || die 26 recovery_insufficient_space
+    # Reject symlinks in an old custom tree before copying over it. Otherwise
+    # an old symlink could redirect the new firmware copy outside staging.
+    for old in "$DEST"/*; do
+        test -e "$old" || continue
+        name=${old##*/}
+        firmware_applet "$name" && continue
+        test -d "$old" && test ! -L "$old" || die 26 recovery_custom_tree_invalid
+        test -z "$(find "$old" -type l -print)" || die 26 recovery_custom_symlinks_require_review
+    done
+    mount -o remount,rw "$MOUNT" >>"$LOG_FILE" 2>&1 || die 24 recovery_remount_failed
+    transaction=$(mktemp -d "$MOUNT/.firmware-recovery.XXXXXX") || die 25 recovery_staging_failed
+    stage COPYING_APPLETS
+    mkdir "$transaction/new" || die 25 recovery_staging_failed
+    for old in "$DEST"/*; do
+        test -e "$old" || continue
+        name=${old##*/}
+        firmware_applet "$name" && continue
+        cp -a "$old" "$transaction/new/" || die 25 recovery_custom_copy_failed
+    done
+    # Reinstalled applets win over their old copies. Core directories come
+    # exclusively from the running firmware, never the previous image.
+    cp -a "$SOURCE/." "$transaction/new/" || die 25 recovery_firmware_copy_failed
+    stage VERIFYING_APPLETS
+    find "$SOURCE" -type f -print | while IFS= read -r file; do
+        "$HELPER" verify-copy "$file" "$transaction/new/${file#"$SOURCE/"}" || exit 1
+    done || die 26 recovery_copy_verification_failed
+    "$transaction/new/StandaloneBase/sb-storage-helper" verify-module "$BUNDLED_MODULE" \
+        >>"$LOG_FILE" 2>&1 || die 26 recovery_helper_verification_failed
+    # Flush staging before promoting. The previous tree is retained in full.
+    sync
+    mv "$DEST" "$transaction/previous-applets" || die 25 recovery_backup_failed
+    if ! mv "$transaction/new" "$DEST"; then
+        mv "$transaction/previous-applets" "$DEST" || die 25 recovery_rollback_requires_review
+        die 25 recovery_promotion_failed
+    fi
+    stage INSTALLING_BOOT_SUPPORT
+    mkdir -p "$PERSIST_DIR" || die 27 recovery_persistent_directory_failed
+    cp "$BUNDLED_MODULE" "$PERSIST_MODULE.new" \
+        && "$HELPER" verify-module "$PERSIST_MODULE.new" >>"$LOG_FILE" 2>&1 \
+        && mv "$PERSIST_MODULE.new" "$PERSIST_MODULE" || die 27 recovery_module_install_failed
+    cp "$APPLET_DIR/storage-boot.sh" "$PERSIST_BOOT.new" \
+        && chmod 755 "$PERSIST_BOOT.new" \
+        && mv "$PERSIST_BOOT.new" "$PERSIST_BOOT" || die 27 recovery_boot_install_failed
+    if test -f "$RCS_LOCAL"; then
+        cp -p "$RCS_LOCAL" "$transaction/rcS.local.before" || die 27 recovery_local_hook_backup_failed
+    fi
+    install_rcs_hook || die 27 recovery_hook_install_failed
+    if ! grep -q 'rcS.local' "$ROOT/etc/init.d/rcS"; then
+        rcs=$ROOT/etc/init.d/rcS
+        cp -p "$rcs" "$transaction/rcS.before" || die 27 recovery_rcs_backup_failed
+        awk '/^\/etc\/init.d\/squeezeplay start$/ {
+            print "# STANDALONEBASE-EXTENDED-STORAGE"
+            print "test ! -x /etc/init.d/rcS.local || /etc/init.d/rcS.local"
+        } {print}' "$rcs" >"$rcs.sbstorage-new" || die 27 recovery_rcs_patch_failed
+        /bin/sh -n "$rcs.sbstorage-new" && chmod 755 "$rcs.sbstorage-new" \
+            && mv "$rcs.sbstorage-new" "$rcs" || die 27 recovery_rcs_patch_failed
+    fi
+    touch "$REBOOT_MARKER" || die 27 recovery_marker_failed
+    # Completed backups do not block later firmware upgrades.
+    mv "$transaction" "$MOUNT/firmware-backup-${transaction##*.}" || die 27 recovery_backup_finalize_failed
+    sync
+    stage COMPLETE
+    printf 'EXIT_CODE=0\nREBOOT_REQUIRED=1\n' >>"$STATUS_FILE"
+    say STATUS=REBOOT_REQUIRED
+    say REBOOT_REQUIRED=1
+)
+
 case ${1:-} in
     check) status_snapshot ;;
+    recover) recover_existing ;;
     mount)
         test "$#" = 2 || { echo "usage: storage-setup.sh mount PATH-TO-sbubifs-authorized.ko" >&2; exit 64; }
         mount_existing "$2"

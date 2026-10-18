@@ -1,6 +1,6 @@
 {
   "catalog_version": "1",
-  "standalone_base_version": "0.5.0",
+  "standalone_base_version": "0.5.2",
   "server": {
     "name": "Standalone Base",
     "uuid": "9d989f40-499a-4b85-b92f-8dc415af2a04",
@@ -15,26 +15,26 @@
     {
       "name": "StandaloneBase",
       "title": "Standalone Base",
-      "version": "0.5.0",
+      "version": "0.5.2",
       "target": "baby",
       "min_target_version": "7.7.3",
-      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.5.0.zip",
-      "sha": "97e46a0bdd4dd0ac67ca673a592a75c9daf453ef",
+      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.5.2.zip",
+      "sha": "26d98c31f768f441f52cd80ecb3ccd1ff272e941",
       "desc": "Local LMS-compatible infrastructure services for Squeezebox Radio.",
-      "changes": "Automatically merge GitHub applet releases into the local catalog, preserve device settings and local packages, and offer a manual update check.",
+      "changes": "Recover existing Extended Storage after firmware upgrades, correct recovery status reporting, and fix LMS server switching.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     },
     {
       "name": "StandaloneRadio",
       "title": "Standalone Radio",
-      "version": "0.9.6",
+      "version": "0.9.7",
       "target": "baby",
       "min_target_version": "7.7",
-      "url": "http://49.12.198.91/sbstandalone/StandaloneRadio-0.9.6.zip",
-      "sha": "913ce2ba4f5b57d09663d0f9a08a15e229c6112a",
+      "url": "http://49.12.198.91/sbstandalone/StandaloneRadio-0.9.7.zip",
+      "sha": "3339e20345ff83ccc495f390b7978e5f0a7c477c",
       "desc": "Standalone internet radio playback for Logitech Squeezebox Radio.",
-      "changes": "Improve RadioFeeds search, playlist resolution, HLS playback and metadata, and station artwork.",
+      "changes": "Improve RadioFeeds and HLS playback, metadata and artwork; release playback control when connecting to an external LMS.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     },

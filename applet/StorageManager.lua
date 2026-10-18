@@ -46,10 +46,10 @@ function Manager:check()
     return result
 end
 
-function Manager:startInitialization(progressCallback, doneCallback)
+function Manager:_startOperation(operation, progressCallback, doneCallback)
     if self.process then return false, "already_running" end
-    local command = "/bin/sh " .. self.root .. "/storage-setup.sh initialize " ..
-        self.root .. "/sbubifs-authorized.ko 2>&1; rc=$?; echo PROCESS_EXIT_CODE=$rc"
+    local command = "/bin/sh " .. self.root .. "/storage-setup.sh " .. operation ..
+        " 2>&1; rc=$?; echo PROCESS_EXIT_CODE=$rc"
     local output, finished = "", false
     self.process = Process(jnt, command)
     self.pollTimer = Timer(500, function()
@@ -72,6 +72,15 @@ function Manager:startInitialization(progressCallback, doneCallback)
         end
     end)
     return true
+end
+
+function Manager:startInitialization(progressCallback, doneCallback)
+    return self:_startOperation("initialize " .. self.root .. "/sbubifs-authorized.ko",
+        progressCallback, doneCallback)
+end
+
+function Manager:startRecovery(progressCallback, doneCallback)
+    return self:_startOperation("recover", progressCallback, doneCallback)
 end
 
 function Manager:stop()

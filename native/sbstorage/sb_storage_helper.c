@@ -789,9 +789,11 @@ static void collect(info_t *i)
 	i->applet_dir = directory(APPLETS);
 	i->standard_applets = directory(APPLETS "/SetupAppletInstaller");
 	i->standalone_base = directory(APPLETS "/StandaloneBase");
-	i->boot_helper = exists(BOOT_HELPER);
+	i->boot_helper = exists(BOOT_HELPER) ||
+		exists("/mnt/storage/standalonebase/storage-boot.sh");
 	i->rcs_local = exists(RCS_LOCAL);
-	i->rcs_integrated = contains(RCS_LOCAL, "STANDALONEBASE-SBDATA");
+	i->rcs_integrated = contains(RCS_LOCAL, "STANDALONEBASE-SBDATA") ||
+		contains(RCS_LOCAL, "STANDALONEBASE-EXTENDED-STORAGE");
 	i->ubifs_supported = contains("/proc/filesystems", "ubifs");
 	i->ubimkvol_tool = exists("/usr/sbin/ubimkvol") ||
 			   exists("/sbin/ubimkvol") ||
@@ -1278,6 +1280,36 @@ static int verify_sbdata_image(const char *n)
 }
 
 /**
+ * @brief Compare two regular files without depending on a firmware cmp tool.
+ * @param first Original file pathname.
+ * @param second Copied file pathname.
+ * @return Zero for identical readable files, two for differences or errors.
+ */
+static int verify_copy(const char *first, const char *second)
+{
+	unsigned char a[4096], b[4096];
+	FILE *left = fopen(first, "rb"), *right = fopen(second, "rb");
+	int result = 2;
+	size_t na, nb;
+
+	if (!left || !right)
+		goto done;
+	do {
+		na = fread(a, 1, sizeof a, left);
+		nb = fread(b, 1, sizeof b, right);
+		if (na != nb || memcmp(a, b, na) || ferror(left) || ferror(right))
+			goto done;
+	} while (na);
+	result = 0;
+done:
+	if (left)
+		fclose(left);
+	if (right)
+		fclose(right);
+	return result;
+}
+
+/**
  * @brief Run the program entry point.
  * @param argc Number of command-line arguments.
  * @param argv Command-line argument vector.
@@ -1286,6 +1318,8 @@ static int verify_sbdata_image(const char *n)
 int main(int argc, char **argv)
 {
 	info_t i;
+	if (argc == 4 && !strcmp(argv[1], "verify-copy"))
+		return verify_copy(argv[2], argv[3]);
 	if (argc == 3 && !strcmp(argv[1], "inspect-superblock"))
 		return inspect(argv[2]);
 	if (argc == 3 && !strcmp(argv[1], "verify-module"))

@@ -176,6 +176,19 @@ function init(self)
     self.remoteBridge=RemoteBridge(); self.remoteBridge:init()
     redirectLiveBootstrapServer()
     self.monitor=Timer(15000,function() self:supervise() end); self.monitor:start()
+    -- A firmware upgrade can leave sbdata intact while removing its boot
+    -- support. Recover asynchronously after reinstall, never during check().
+    self.storageRecoveryTimer=Timer(2000,function()
+        self.storageRecoveryTimer=nil
+        local status=storage:check()
+        if tonumber(status.RECOVERY_SUPPORTED)==1 then
+            storage:startRecovery(nil,function(exitCode, result)
+                self.storageRecoveryResult=result
+                self.storageRecoveryFailed=exitCode~=0
+            end)
+        end
+    end,true)
+    self.storageRecoveryTimer:start()
 end
 function startServices(self)
     for _,s in ipairs(SERVICES) do if not launch(s) then self.failures[s.exe]=1 end end
@@ -200,7 +213,7 @@ function menu(self)
     for _,s in ipairs(SERVICES) do menu:addItem({text=s.name..": "..(alive(s) and "Running" or "Stopped")}) end
     menu:addItem({text="Extended Storage",callback=function() self:storageMenu() end})
     menu:addItem({text="Web Access",callback=function() if not self.remoteBridge:isInjecting() then self:webAccessMenu() end end})
-	menu:addItem({text="Version: 0.5.0"})
+	menu:addItem({text="Version: 0.5.2"})
     window:addWidget(menu); window:show()
 end
 function webAccessMenu(self)
@@ -263,18 +276,24 @@ function storageMenu(self)
     local window=Window("text_list","Extended Storage")
     local menu=SimpleMenu("menu")
     menu:addItem({text="Status: "..ExtendedStorageState.statusLabel(s.STATUS),style="item_info"})
-    if s.STATUS=="ACTIVE" then
+    if storage.process then
+        menu:setHeaderWidget(Textarea("help_text","Recovering Extended Storage after firmware update. Please wait; do not restart yet."))
+    elseif self.storageRecoveryFailed and s.STATUS~="ACTIVE" and s.STATUS~="REBOOT_REQUIRED" then
+        menu:setHeaderWidget(Textarea("help_text","Extended Storage recovery stopped safely. See /tmp/sbstorage.log. Existing data and the previous applet tree were retained."))
+    elseif s.STATUS=="ACTIVE" then
         menu:addItem({text="Capacity: "..ExtendedStorageState.mibFromKb(s.TOTAL_KB),style="item_info"})
         menu:addItem({text="Used: "..ExtendedStorageState.mibFromKb(s.USED_KB),style="item_info"})
         menu:addItem({text="Free: "..ExtendedStorageState.mibFromKb(s.FREE_KB),style="item_info"})
         menu:addItem({text="Applet storage: Extended Storage",style="item_info"})
+    elseif tonumber(s.RECOVERY_SUPPORTED)==1 then
+        menu:setHeaderWidget(Textarea("help_text","Existing Extended Storage needs recovery, not initialization. Recovery runs automatically after Standalone Base starts. See /tmp/sbstorage.log if it cannot complete."))
     elseif s.STATUS=="AVAILABLE" then
         menu:setHeaderWidget(Textarea("help_text","Additional internal storage is available on this Radio."))
         if tonumber(s.INITIALIZATION_SUPPORTED)==1 then
             menu:addItem({text="Initialize Storage",callback=function() self:confirmStorageInitialization() end})
         else menu:addItem({text="Initialization prerequisites unavailable",style="item_info"}) end
     elseif s.STATUS=="REBOOT_REQUIRED" then
-        menu:setHeaderWidget(Textarea("help_text","Extended Storage is initialized. Restart the Radio to activate it."))
+        menu:setHeaderWidget(Textarea("help_text","Extended Storage is ready. Restart the Radio to activate it."))
         menu:addItem({text="Restart Now",callback=function() appletManager:callService("reboot") end})
     else
         menu:setHeaderWidget(Textarea("help_text","Extended Storage cannot be initialized on the detected storage layout."))
@@ -335,6 +354,7 @@ function getStandaloneStoragePreparation(self) return storage:getStoragePreparat
 function verifyStandaloneStorage(self) return storage:verifyStorage() end
 function free(self)
     if self.monitor then self.monitor:stop() end
+    if self.storageRecoveryTimer then self.storageRecoveryTimer:stop(); self.storageRecoveryTimer=nil end
     if self.timeSync then self.timeSync:stop(); self.timeSync=nil end
     if self.remoteBridge then self.remoteBridge:stop(); self.remoteBridge=nil end
     storage:stop()

@@ -17,6 +17,11 @@ add_test(NAME extended_storage COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/storage/te
   ${CMAKE_SOURCE_DIR}/artifacts/ubi/sbdata-empty.ubifs)
 find_program(LUA_EXECUTABLE NAMES lua lua5.1)
 if(LUA_EXECUTABLE)
+  add_test(NAME storage_recovery_menu COMMAND ${LUA_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/storage/test_recovery_menu.lua ${CMAKE_SOURCE_DIR})
+  add_test(NAME storage_recovery_manager COMMAND ${LUA_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/storage/test_storage_recovery_manager.lua
+    ${CMAKE_SOURCE_DIR})
   add_test(NAME artwork_lua COMMAND ${LUA_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/images/test_artwork.lua ${CMAKE_SOURCE_DIR})
   add_test(NAME image_helper_lua COMMAND ${LUA_EXECUTABLE}
@@ -48,6 +53,11 @@ endif()
 if(NOT WIN32)
   find_package(Python3 COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
+    add_test(NAME storage_firmware_recovery COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/storage/test_firmware_recovery.py
+      ${CMAKE_SOURCE_DIR}/scripts/storage-setup.sh
+      ${CMAKE_SOURCE_DIR}/scripts/storage-boot.sh $<TARGET_FILE:sb-storage-helper>
+      ${CMAKE_SOURCE_DIR}/artifacts/sbubifs-authorized.ko)
     find_package(Threads REQUIRED)
     add_executable(test_catalog_merge repository/test_catalog_merge.c
       ../native/sbwebserver/src/repository.c ../native/sbwebserver/third_party/mongoose.c)
@@ -104,6 +114,7 @@ if(NOT WIN32)
     endif()
     add_test(NAME comet_connections COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/comet/test_connections.py $<TARGET_FILE:sbbase>)
     add_test(NAME comet_menustatus COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/comet/test_menustatus.py $<TARGET_FILE:sbbase>)
+    add_test(NAME comet_server_switch COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/comet/test_server_switch.py $<TARGET_FILE:sbbase>)
     add_test(NAME nowplaying_poc COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/comet/test_nowplaying.py $<TARGET_FILE:sbbase>)
     add_test(NAME nowplaying_api COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/comet/test_nowplaying_api.py $<TARGET_FILE:sbbase>)
     add_test(NAME lpt_geometry COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/storage/test_lpt_geometry.py)

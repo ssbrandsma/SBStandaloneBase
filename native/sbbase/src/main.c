@@ -12,6 +12,7 @@
 #include "nowplaying.h"
 
 #include <arpa/inet.h>
+#include <ctype.h>
 
 #include <errno.h>
 
@@ -28,6 +29,7 @@
 #include <stdlib.h>
 
 #include <string.h>
+#include <strings.h>
 
 #include <sys/socket.h>
 
@@ -53,6 +55,7 @@ typedef struct {
 	size_t used;
 	char client_id[32];
 	char subscribed_player[18];
+	char slim_player[18];
 	unsigned char buf[SB_MAX_HTTP_HEADER + SB_MAX_HTTP_BODY + 1];
 } client;
 
@@ -708,11 +711,141 @@ static int load_catalog(const char *path)
 }
 
 /**
- * @brief Handle request responses.
- * @param body Input text for body.
- * @param cfg Object referenced by cfg.
- * @param out Destination buffer for the result.
- * @param cap Size or count for cap.
+ * @brief Read one bounded, unescaped command string from a JSON cursor.
+ * @param cursor Current input position; advanced after a successful read.
+ * @param end Exclusive request boundary.
+ * @param out Destination string buffer.
+ * @param cap Destination capacity including the terminator.
+ * @return One on success, zero for malformed or oversized input.
+ */
+static int command_string(const char **cursor, const char *end,
+			  char *out, size_t cap)
+{
+	const char *p = *cursor;
+	size_t n = 0;
+
+	while (p < end && isspace((unsigned char)*p))
+		p++;
+	if (p == end || *p++ != '"')
+		return 0;
+	while (p < end && *p != '"') {
+		if ((unsigned char)*p < 32 || *p == '\\' || n + 1 >= cap)
+			return 0;
+		out[n++] = *p++;
+	}
+	if (p == end)
+		return 0;
+	out[n] = 0;
+	*cursor = p + 1;
+	return 1;
+}
+
+/**
+ * @brief Consume a JSON delimiter and surrounding leading whitespace.
+ * @param cursor Input cursor, advanced on success.
+ * @param end Exclusive request boundary.
+ * @param ch Required delimiter.
+ * @return One when the delimiter is present, otherwise zero.
+ */
+static int command_delimiter(const char **cursor, const char *end, char ch)
+{
+	while (*cursor < end && isspace((unsigned char)**cursor))
+		(*cursor)++;
+	if (*cursor == end || **cursor != ch)
+		return 0;
+	(*cursor)++;
+	return 1;
+}
+
+/**
+ * @brief Send a Jive connect command to its matching SlimProto connection.
+ * @param start Beginning of the current CometD request.
+ * @param end Exclusive request boundary; never inspect the next batch item.
+ * @return Zero for another command, one for success, minus one on failure.
+ *
+ * Jive sends connect to the old server, which must emit serv to the player.
+ * Only literal unicast IPv4 addresses are accepted: no DNS, shell, network
+ * probe, or special SqueezeNetwork destination is needed in this callback.
+ */
+static int switch_server(const char *start, const char *end)
+{
+	const char *p = strstr(start, "\"request\"");
+	char player[18], command[32], address[16];
+	struct in_addr ip;
+	unsigned char frame[10];
+	uint32_t host;
+	size_t size;
+	int i;
+
+	if (!p || p >= end)
+		return 0;
+	p += strlen("\"request\"");
+	if (!command_delimiter(&p, end, ':') ||
+	    !command_delimiter(&p, end, '[') ||
+	    !command_string(&p, end, player, sizeof player) ||
+	    !command_delimiter(&p, end, ',') ||
+	    !command_delimiter(&p, end, '[') ||
+	    !command_string(&p, end, command, sizeof command) ||
+	    strcmp(command, "connect"))
+		return 0;
+	if (!command_delimiter(&p, end, ',') ||
+	    !command_string(&p, end, address, sizeof address) ||
+	    !command_delimiter(&p, end, ']') ||
+	    !command_delimiter(&p, end, ']') ||
+	    !valid_player_id(player) || inet_pton(AF_INET, address, &ip) != 1)
+		return -1;
+	host = ntohl(ip.s_addr);
+	if ((host >> 24) == 0 || (host >> 24) >= 224)
+		return -1;
+	size = sb_server_frame("serv", &ip.s_addr, sizeof ip.s_addr,
+			       frame, sizeof frame);
+	for (i = 0; i < CLIENTS; i++) {
+		client *c = &clients[i];
+
+		if (c->fd < 0 || c->kind != 1 || !c->helo ||
+		    strcasecmp(c->slim_player, player))
+			continue;
+		if (!send_data(c, (const char *)frame, size))
+			return -1;
+		fprintf(stderr, "Server switch player=%s destination=%s\n",
+			player, address);
+		return 1;
+	}
+	return -1;
+}
+
+/**
+ * @brief Find the end of one JSON message without relying on optional IDs.
+ * @param p Opening brace of a message.
+ * @return Position after its closing brace, or NULL for incomplete input.
+ */
+static const char *message_end(const char *p)
+{
+	int depth = 0, quoted = 0;
+
+	for (; *p; p++) {
+		if (quoted) {
+			if (*p == '\\' && p[1])
+				p++;
+			else if (*p == '"')
+				quoted = 0;
+		} else if (*p == '"') {
+			quoted = 1;
+		} else if (*p == '{') {
+			depth++;
+		} else if (*p == '}' && --depth == 0) {
+			return p + 1;
+		}
+	}
+	return NULL;
+}
+
+/**
+ * @brief Dispatch CometD commands and construct their response batch.
+ * @param body Received JSON batch.
+ * @param cfg Local server configuration.
+ * @param out Response JSON buffer.
+ * @param cap Capacity of the response buffer.
  */
 static void
 request_responses(const char *body, const sb_config *cfg, char *out, size_t cap)
@@ -720,25 +853,40 @@ request_responses(const char *body, const sb_config *cfg, char *out, size_t cap)
 
 	const char *p = body, *next;
 	size_t used = 1;
-	char id[32], reply[160], msg[20000], data[18000];
+	char id[32], id_field[48], reply[160], msg[20000], data[18000];
 	out[0] = '[';
 	out[1] = 0;
 
-	while ((p = strstr(p, "\"id\"")) != NULL) {
-		next = strstr(p + 4, "\"id\"");
+	while ((p = strchr(p, '{')) != NULL) {
+		int switched;
+		next = message_end(p);
 		if (!next)
-			next = p + strlen(p);
+			break;
 		id[0] = 0;
 		reply[0] = 0;
-		json_raw(p, "\"id\"", id, sizeof id);
+		if (before(p, "\"id\"", next))
+			json_raw(p, "\"id\"", id, sizeof id);
+		snprintf(id_field, sizeof id_field, "%s%s%s",
+			 id[0] ? "\"id\":" : "", id, id[0] ? "," : "");
 		if (before(p, "\"response\"", next))
 			json_string(p, "\"response\"", reply, sizeof reply);
-		if (!id[0] || !reply[0]) {
-			p += 4;
+		if (!reply[0]) {
+			p = next;
 			continue;
 		}
 
-		if (before(p, "serverstatus", next))
+		switched = switch_server(p, next);
+		if (switched < 0) {
+			snprintf(msg, sizeof msg,
+				 "{%s\"channel\":\"/slim/request\","
+				 "\"successful\":false,\"error\":\"Server switch failed\"}", id_field);
+			add_json(out, cap, &used, msg);
+			p = next;
+			continue;
+		}
+		if (switched)
+			strcpy(data, "{}");
+		else if (before(p, "serverstatus", next))
 			snprintf(data,
 				 sizeof data,
 				 "{\"httpport\":\"%u\",\"ip\":\"%s\","
@@ -852,14 +1000,14 @@ request_responses(const char *body, const sb_config *cfg, char *out, size_t cap)
 
 		snprintf(msg,
 			 sizeof msg,
-			 "{\"id\":%s,\"channel\":\"/slim/"
+			 "{%s\"channel\":\"/slim/"
 			 "request\",\"successful\":true}",
-			 id);
+			 id_field);
 		add_json(out, cap, &used, msg);
 		snprintf(msg,
 			 sizeof msg,
-			 "{\"id\":%s,\"channel\":\"%s\",\"data\":%s}",
-			 id,
+			 "{%s\"channel\":\"%s\",\"data\":%s}",
+			 id_field,
 			 reply,
 			 data);
 		add_json(out, cap, &used, msg);
@@ -1214,6 +1362,7 @@ static void handle_slim(client *c)
 					 p[6],
 					 p[7]);
 				player_connected = 1;
+				strcpy(c->slim_player, player_id);
 			}
 			c->helo = 1;
 			keepalive(c);
