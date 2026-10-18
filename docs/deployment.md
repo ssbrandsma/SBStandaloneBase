@@ -19,8 +19,18 @@ Update the tracked `config.json` when releasing applets. A private alternative
 may remain under `.local/`; select it explicitly with PowerShell `-ConfigPath`
 or shell `SB_PACKAGE_CONFIG`. Private deployment configuration remains ignored.
 The remote bootstrap catalog remains Base-only; the embedded local catalog
-contains Standalone Radio, Spotify Connect, and Qobuz Connect for installation
-after Base switches the Radio to its local service.
+contains Standalone Base, Standalone Radio, Spotify Connect, and Qobuz Connect.
+After loading the refreshed catalog, the local Applet Installer can offer Base
+updates without switching the selected LMS back to the bootstrap server. The
+standard installer performs its normal reboot after installation. This catalog
+entry does not add a new self-update mechanism or automatically refresh an
+already installed Radio's persistent configuration.
+
+For a Base release, build and publish the ZIP first, then update the public
+Base entry to its final version, URL and SHA-1. Do not repack that same ZIP to
+embed its own final checksum: that would change the ZIP and invalidate the
+checksum. Its packaged catalog may refer to the preceding Base release;
+the refreshed public catalog advertises the new release.
 
 On initialization, the applet identifies the bootstrap service by its stable UUID or name and migrates its configured endpoint to `127.0.0.1`. It also replaces the bootstrap server UUID and name with the Standalone Base identity. Before changing a file, it preserves its original contents once in a sibling `.pre-standalonebase` backup. The migration is idempotent and does not modify unrelated configured servers.
 

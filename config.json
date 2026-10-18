@@ -13,6 +13,19 @@
   },
   "applets": [
     {
+      "name": "StandaloneBase",
+      "title": "Standalone Base",
+      "version": "0.4.4",
+      "target": "baby",
+      "min_target_version": "7.7.3",
+      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.4.4.zip",
+      "sha": "c481883670f928d28a1387c469f5cb5013f9faa5",
+      "desc": "Local LMS-compatible infrastructure services for Squeezebox Radio.",
+      "changes": "Native HLS audio and timed metadata, efficient metadata delivery, local artwork routing, and updated applet catalog.",
+      "creator": "Sjoerd Brandsma",
+      "email": ""
+    },
+    {
       "name": "StandaloneRadio",
       "title": "Standalone Radio",
       "version": "0.9.6",
