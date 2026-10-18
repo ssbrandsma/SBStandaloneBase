@@ -1,5 +1,5 @@
 /*
- * Loopback HTTP-to-HTTPS compatibility proxy.
+ * Loopback HTTP/HTTPS compatibility proxy and streaming artwork transport.
  *
  * Uses libcurl and bounded worker threads to fetch upstream resources for
  * legacy Jive clients. Runs as the separate sbproxy service supervised by the
@@ -23,8 +23,45 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
+#include "../common/public_address.h"
+#include "hls.h"
 
-#define VERSION "0.4.0"
+/** Enforce opt-in public destinations on actual sockets, including redirects.
+ */
+static curl_socket_t public_image_socket(void *data,
+					 curlsocktype purpose,
+					 struct curl_sockaddr *address)
+{
+	(void)data;
+	(void)purpose;
+#ifdef SB_PROXY_TESTING
+	/* Dedicated host-test executable only; never compiled into shipped
+	 * binaries. */
+	const char *ports = getenv("SB_PROXY_TEST_PORTS");
+	unsigned first = 0, second = 0;
+	if (ports && address->family == AF_INET &&
+	    sscanf(ports, "%u,%u", &first, &second) == 2) {
+		struct sockaddr_in *test = (struct sockaddr_in *)&address->addr;
+		unsigned port = ntohs(test->sin_port);
+		if (ntohl(test->sin_addr.s_addr) == INADDR_LOOPBACK &&
+		    (port == first || port == second))
+			return socket(address->family,
+				      address->socktype,
+				      address->protocol);
+	}
+#endif
+	if (address->family != AF_INET ||
+	    !sb_public_ipv4((const unsigned char *)&(
+				    (struct sockaddr_in *)&address->addr)
+				    ->sin_addr))
+		return CURL_SOCKET_BAD;
+	unsigned port = ntohs(((struct sockaddr_in *)&address->addr)->sin_port);
+	if (port != 80 && port != 443)
+		return CURL_SOCKET_BAD;
+	return socket(address->family, address->socktype, address->protocol);
+}
+
+#define VERSION "0.4.4"
 
 #define MAX_REQUEST 16384
 #define MAX_HEADERS 32768
@@ -44,6 +81,11 @@ typedef struct {
 
 	size_t length;
 	size_t bytes;
+	/* Only SVG is dispatched to the existing renderer. Raster bytes stream.
+	 */
+	const char *artwork_source;
+	unsigned width, height, web_port;
+	int svg, svg_redirect;
 } transfer_ctx;
 
 static pthread_mutex_t worker_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -366,6 +408,7 @@ static size_t header_cb(char *data, size_t size, size_t count, void *opaque)
 		ctx->status = space ? atoi(space + 1) : 0;
 		ctx->length = 0;
 		ctx->headers[0] = '\0';
+		ctx->svg = 0;
 
 		return length;
 	}
@@ -384,7 +427,57 @@ static size_t header_cb(char *data, size_t size, size_t count, void *opaque)
 			return length;
 		}
 
+		if (ctx->artwork_source && ctx->status == 200 && ctx->svg) {
+			/* Escape the source, not its query components
+			 * independently. */
+			static const char hex[] = "0123456789ABCDEF";
+			char escaped[4096 * 3 + 1];
+			size_t n = 0;
+			const unsigned char *p =
+				(const unsigned char *)ctx->artwork_source;
+			for (; *p; p++) {
+				if ((*p >= 'a' && *p <= 'z') ||
+				    (*p >= 'A' && *p <= 'Z') ||
+				    (*p >= '0' && *p <= '9') ||
+				    strchr("-._~", *p))
+					escaped[n++] = (char)*p;
+				else {
+					escaped[n++] = '%';
+					escaped[n++] = hex[*p >> 4];
+					escaped[n++] = hex[*p & 15];
+				}
+			}
+			escaped[n] = 0;
+			char header[4096 * 3 + 320];
+			int count = snprintf(
+				header,
+				sizeof(header),
+				"HTTP/1.1 302 Found\r\nLocation: "
+				"http://127.0.0.1:%u/api/image/"
+				"render?url=%s&width=%u&height=%u\r\n"
+				"Content-Length: 0\r\nCache-Control: "
+				"no-store\r\nConnection: close\r\n\r\n",
+				ctx->web_port,
+				escaped,
+				ctx->width,
+				ctx->height);
+			if (count < 0 || count >= (int)sizeof(header))
+				return 0;
+			ctx->started = ctx->svg_redirect = 1;
+			return send_all(ctx->fd, header, (size_t)count)
+				       ? 0
+				       : length;
+		}
 		return emit_headers(ctx) ? 0 : length;
+	}
+	if (length >= 13 && !strncasecmp(data, "Content-Type:", 13)) {
+		const char *value = data + 13, *end = data + length;
+		while (value < end && (*value == ' ' || *value == '\t'))
+			value++;
+		if (end - value >= 13 &&
+		    !strncasecmp(value, "image/svg+xml", 13) &&
+		    (end - value == 13 || strchr("; \t\r\n", value[13])))
+			ctx->svg = 1;
 	}
 
 	if (ctx->length + length > MAX_HEADERS) {
@@ -411,6 +504,8 @@ static size_t body_cb(char *data, size_t size, size_t count, void *opaque)
 {
 	transfer_ctx *ctx = opaque;
 	size_t length = size * count;
+	if (ctx->svg_redirect)
+		return 0;
 
 	/*
 	 * Redirect bodies are ignored because libcurl follows
@@ -480,9 +575,10 @@ receive_request(int fd, char *request, size_t capacity, size_t *length_out)
 /**
  * @brief Build request headers.
  * @param request Mutable text buffer for request.
+ * @param public_only Restrict public fetches to non-credential image headers.
  * @return Pointer to the requested object, or `NULL` when unavailable.
  */
-static struct curl_slist *build_request_headers(char *request)
+static struct curl_slist *build_request_headers(char *request, int public_only)
 {
 	struct curl_slist *result = NULL;
 	char *save = NULL;
@@ -499,7 +595,16 @@ static struct curl_slist *build_request_headers(char *request)
 		char name[128];
 
 		if (get_header_name(line, name, sizeof(name)) &&
-		    strcasecmp(name, "host") && !is_static_hop_header(name) &&
+		    (!public_only || !strcasecmp(name, "Range") ||
+		     !strcasecmp(name, "If-Range") ||
+		     !strcasecmp(name, "Accept") ||
+		     !strcasecmp(name, "Accept-Encoding") ||
+		     !strcasecmp(name, "User-Agent") ||
+		     !strcasecmp(name, "If-None-Match") ||
+		     !strcasecmp(name, "If-Modified-Since")) &&
+		    strcasecmp(name, "host") &&
+		    strcasecmp(name, "x-sb-public-fetch") &&
+		    !is_static_hop_header(name) &&
 		    !token_contains(tokens, name)) {
 
 			struct curl_slist *next =
@@ -552,6 +657,8 @@ static int send_health_response(int fd, int head)
 				 sizeof(headers),
 				 "HTTP/1.1 200 OK\r\n"
 				 "Content-Type: text/plain\r\n"
+				 "X-SB-Public-Fetch: 1\r\n"
+				 "X-SB-HLS: aac-mp3-ts\r\n"
 				 "Content-Length: %d\r\n"
 				 "Connection: close\r\n"
 				 "\r\n",
@@ -755,6 +862,9 @@ static void *worker_main(void *opaque)
 
 	int received;
 	int is_head;
+	int artwork = 0, plain_http = 0, hls = 0;
+	unsigned width = 0, height = 0, web_port = 0;
+	const char *source_target = target;
 
 	CURL *curl = NULL;
 	struct curl_slist *headers = NULL;
@@ -798,6 +908,7 @@ static void *worker_main(void *opaque)
 	}
 
 	is_head = !strcasecmp(method, "HEAD");
+	if (hls_metadata_http(fd, target, is_head)) goto done;
 
 	/*
 	 * Local health endpoint.
@@ -817,21 +928,50 @@ static void *worker_main(void *opaque)
 	 *
 	 *   https://example.com/path
 	 */
-	if (strncmp(target, "/https/", 7)) {
+	if (!strncmp(target, "/hls/", 5)) {
+		hls = 1;
+		source_target = target + 4;
+	}
+	if (!strncmp(target, "/artwork/", 9)) {
+		int used = 0;
+		if (sscanf(target,
+			   "/artwork/%u/%u/%u/%n",
+			   &width,
+			   &height,
+			   &web_port,
+			   &used) != 3 ||
+		    !used || width < 16 || width > 512 || height < 16 ||
+		    height > 512 || !web_port || web_port > 65535) {
+			send_error(fd, 400, "Malformed Artwork URL");
+			goto done;
+		}
+		artwork = 1;
+		source_target = target + used - 1;
+	}
+	plain_http = !strncmp(source_target, "/http/", 6);
+	if (!plain_http && strncmp(source_target, "/https/", 7)) {
 		send_error(fd, 404, "Not Found");
 
 		goto done;
 	}
 
-	if (!target[7] || !strchr(target + 7, '/')) {
+	const char *authority = source_target + (plain_http ? 6 : 7);
+	const char *slash = strchr(authority, '/');
+	if (!*authority || !slash || slash == authority ||
+	    strpbrk(authority, "\r\n\\#") ||
+	    memchr(authority, '@', slash ? (size_t)(slash - authority) : 0) ||
+	    ((artwork || hls) && strlen(authority) > 4087)) {
 
 		send_error(fd, 400, "Malformed Proxy URL");
 
 		goto done;
 	}
 
-	if (snprintf(url, sizeof(url), "https://%s", target + 7) >=
-	    (int)sizeof(url)) {
+	if (snprintf(url,
+		     sizeof(url),
+		     "%s://%s",
+		     plain_http ? "http" : "https",
+		     authority) >= (int)sizeof(url)) {
 
 		send_error(fd, 414, "URI Too Long");
 
@@ -844,7 +984,8 @@ static void *worker_main(void *opaque)
 	 */
 	memcpy(request_copy, request, request_length + 1);
 
-	headers = build_request_headers(request_copy);
+	headers = build_request_headers(request_copy,
+					artwork || plain_http || hls);
 
 	/*
 	 * Create the upstream libcurl connection.
@@ -860,13 +1001,83 @@ static void *worker_main(void *opaque)
 	memset(&transfer, 0, sizeof(transfer));
 
 	transfer.fd = fd;
+	if (artwork) {
+		transfer.artwork_source = url;
+		transfer.width = width;
+		transfer.height = height;
+		transfer.web_port = web_port;
+	}
 
 	configure_curl(curl, url, headers, &transfer, is_head, curl_error);
+	/* Opt-in only: ordinary compatibility-proxy requests retain their
+	 * policy. */
+	if (artwork || plain_http || hls ||
+	    strstr(request, "\r\nX-SB-Public-Fetch: 1\r\n")) {
+		curl_easy_setopt(
+			curl, CURLOPT_OPENSOCKETFUNCTION, public_image_socket);
+		curl_easy_setopt(curl, CURLOPT_PROXY, "");
+#if LIBCURL_VERSION_NUM >= 0x075500
+		curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
+		curl_easy_setopt(
+			curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+#else
+		curl_easy_setopt(curl,
+				 CURLOPT_PROTOCOLS,
+				 (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+		curl_easy_setopt(curl,
+				 CURLOPT_REDIR_PROTOCOLS,
+				 (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+#endif
+		curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
+		curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 3L);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 8L);
+		if (!artwork && !plain_http && !hls)
+			curl_easy_setopt(curl,
+					 CURLOPT_MAXFILESIZE_LARGE,
+					 (curl_off_t)(1024u * 1024u));
+	}
 
 	/*
 	 * Avoid logging URL query parameters because they may
 	 * contain tokens or other sensitive data.
 	 */
+	if (hls) {
+		/* Signed CDN paths can contain credentials as well as queries.
+		 */
+		log_line("%s HLS loopback stream", method);
+		int expected_codec = 0;
+		const char *line = strstr(request, "\r\n");
+		while (line && line[2]) {
+			line += 2;
+			const char *end = strstr(line, "\r\n");
+			if (!end || end == line)
+				break;
+			if (end - line >= 15 &&
+			    !strncasecmp(line, "X-SB-HLS-Codec:", 15)) {
+				const char *value = line + 15;
+				while (value < end &&
+				       (*value == ' ' || *value == '\t'))
+					value++;
+				const char *last = end;
+				while (last > value &&
+				       (last[-1] == ' ' || last[-1] == '\t'))
+					last--;
+				if (expected_codec || last - value != 3 ||
+				    (strncasecmp(value, "aac", 3) &&
+				     strncasecmp(value, "mp3", 3))) {
+					send_error(
+						fd, 400, "Invalid HLS Codec");
+					goto done;
+				}
+				expected_codec = !strncasecmp(value, "aac", 3)
+							 ? HLS_AAC
+							 : HLS_MP3;
+			}
+			line = end;
+		}
+		hls_relay(curl, fd, url, is_head, is_head ? 0 : expected_codec);
+		goto done;
+	}
 	log_request(method, target);
 
 	clock_gettime(CLOCK_MONOTONIC, &start);

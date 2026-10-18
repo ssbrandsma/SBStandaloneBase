@@ -53,6 +53,13 @@ def main():
             assert odd["ppid"]==1 and odd["user_ticks"]==10 and odd["system_ticks"]==4
             assert odd["start_ticks"]==100 and odd["vsize_bytes"]==409600 and odd["rss_pages"]==20
             assert headers["Cache-Control"]=="no-store"
+            # RT16 appends user_rt/system_rt (already included in user/system)
+            # and then guest. Never sum or relabel these as modern guest_nice.
+            (proc/"stat").write_text("cpu 94349 0 13441 3370 2 49 38 0 89623 9197 0\nbtime 1700000000\n")
+            status,body,_=request(base,"/api/monitor/snapshot",cookie);assert status==200
+            cpu=json.loads(body)["cpu"]
+            assert cpu==dict(user=94349,nice=0,system=13441,idle=3370,iowait=2,irq=49,softirq=38,steal=0)
+            assert sum(cpu.values())==111249
             script=pathlib.Path(web,"js","performance.js").read_text();compact="".join(script.split());assert "INTERVALS=[1,2,5,10,30,60]" in compact and "WINDOW_SECONDS=600" in compact and "document.hidden" in script
         finally:
             process.terminate();process.wait(timeout=3)

@@ -47,6 +47,11 @@ int main(void)
 	struct timespec delay = {1, 100000000};
 
 	assert(m);
+	/* SlimBrowser.DB requires count even when the playlist is empty. */
+	assert(np_playerstatus_json(m, reply, sizeof reply) > 0);
+	assert(strstr(reply, "\"count\":0,"));
+	assert(strstr(reply, "\"offset\":0,"));
+	assert(strstr(reply, "\"playlist_tracks\":0,"));
 	assert(call(m,
 		    "/api/nowplaying/claim",
 		    "{\"source\":\"radio\",\"name\":\"Radio\"}",
@@ -74,6 +79,10 @@ int main(void)
 		    sizeof reply) == 200);
 	assert((changed & NP_CHANGE_IDENTITY) != 0);
 	revision = np_current(m)->playlist_revision;
+	assert(np_playerstatus_json(m, reply, sizeof reply) > 0);
+	assert(strstr(reply, "\"count\":1,"));
+	assert(strstr(reply, "\"offset\":0,"));
+	assert(strstr(reply, "\"playlist_tracks\":1,"));
 
 	/* An exact repeat refreshes the lease but emits no visible-state
 	 * change. */
@@ -145,6 +154,9 @@ int main(void)
 	nanosleep(&delay, NULL);
 	assert(np_expire(m) == 1);
 	assert(!np_current(m)->active);
+	assert(np_playerstatus_json(m, reply, sizeof reply) > 0);
+	assert(strstr(reply, "\"count\":0,"));
+	assert(strstr(reply, "\"playlist_tracks\":0,"));
 	assert(call(m,
 		    "/api/nowplaying/update",
 		    claim,

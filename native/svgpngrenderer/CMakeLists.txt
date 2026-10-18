@@ -1,0 +1,3 @@
+add_executable(svgpngrenderer main.c)
+target_include_directories(svgpngrenderer PRIVATE third_party)
+target_link_libraries(svgpngrenderer PRIVATE m)

@@ -12,6 +12,14 @@ that file and returns its entries for the Applet Installer `jiveapplets`
 request. Catalog updates must be supplied through the authenticated management
 interface or another explicitly configured private distribution channel.
 
+An ignored root `config.json` may be kept as a convenient local mirror of
+`.local/config.json`. Keep the two synchronized when updating release versions,
+download URLs, and ZIP SHA-1 values. The package builder reads `.local/config.json`
+by default, not the root mirror. Neither populated file should be added to Git.
+The remote bootstrap catalog remains Base-only; the embedded local catalog
+contains Standalone Radio, Spotify Connect, and Qobuz Connect for installation
+after Base switches the Radio to its local service.
+
 On initialization, the applet identifies the bootstrap service by its stable UUID or name and migrates its configured endpoint to `127.0.0.1`. It also replaces the bootstrap server UUID and name with the Standalone Base identity. Before changing a file, it preserves its original contents once in a sibling `.pre-standalonebase` backup. The migration is idempotent and does not modify unrelated configured servers.
 
 SqueezePlay 9.x loads applet settings before third-party applets initialize and can otherwise save the stale bootstrap address over the migrated file. Standalone Base therefore also migrates the live `ChooseMusicSource` and `SlimDiscovery` settings, updates the active discovery poll list, and waits for the correctly identified loopback server before switching a player that is still attached to the bootstrap server. This compatibility path never switches a player away from an unrelated LMS selection.

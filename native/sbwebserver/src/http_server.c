@@ -18,6 +18,7 @@
 #include "auth.h"
 #include "logs.h"
 #include "monitor.h"
+#include "image_render.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -538,6 +539,8 @@ normal(Server *s, struct mg_connection *c, struct mg_http_message *m)
 		auth_handle(c, m, remote_internal_authorized(c, m));
 		return;
 	}
+	if (image_render_handle(c, m))
+		return;
 	if (is(m->uri, "/api/remote/actions")) {
 		remote_handle(c, m, x.readonly);
 		return;
@@ -693,6 +696,8 @@ static void fn(struct mg_connection *c, int ev, void *data)
 	Upload *u = up(s, c->id, 0);
 	if (ev == MG_EV_HTTP_HDRS) {
 		struct mg_http_message *m = data;
+		if (image_render_headers(c, m))
+			return;
 		if (is(m->uri, "/api/applets/upload") && is(m->method, "POST"))
 			start(s, c, m);
 		else if (is(m->uri, "/api/radio/logos") &&
@@ -753,6 +758,7 @@ int http_server_run(int port, const char *root)
 	}
 	for (;;) {
 		mg_mgr_poll(&mgr, 100);
+		image_render_tick(&mgr);
 		remote_tick();
 	}
 }

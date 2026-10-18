@@ -11,6 +11,9 @@ StandaloneBase is a three-process native runtime plus SqueezePlay applet for a L
 
 Browser management uses physical six-digit PIN pairing and short-lived HttpOnly sessions; see [Web Access pairing](docs/WEB_ACCESS_PAIRING.md).
 
+SVG artwork can be converted through the local image endpoint and standalone
+ARMv5 renderer; see [SVG rendering](docs/SVG_RENDERING.md).
+
 The authenticated web interface also provides read-only live system logs and a
 stateless System Performance/process monitor. See
 [`docs/SYSTEM_LOG_VIEWER.md`](docs/SYSTEM_LOG_VIEWER.md) and
@@ -56,3 +59,17 @@ To produce another version, update:
 Deployment endpoints, account names, filesystem paths and container names are
 private local configuration. Copy `packaging/deployment.env.example` to
 `.local/deployment.env`, populate it locally, and never commit that file.
+
+## Artwork routing
+
+See [local artwork routing](docs/ARTWORK_ROUTING.md) for the HTTP/HTTPS loopback
+transport, SVG integration, firmware adapters, tests and hardware validation.
+
+## HLS audio
+
+See [the HLS implementation report](docs/HLS_AUDIO.md) for the native loopback
+AAC/MP3 relay, supported formats, resource limits, tests and hardware status.
+See [timed ID3 metadata](docs/HLS_TIMED_METADATA.md) for session-aware track
+updates, bounded artwork and synchronization limits.
+The [metadata-delivery optimization](docs/HLS_METADATA_DELIVERY.md) replaces
+500 ms HTTP polling with bounded long polling and one-shot playback timers.

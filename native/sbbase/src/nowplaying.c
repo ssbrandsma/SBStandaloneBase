@@ -602,7 +602,7 @@ int np_playerstatus_json(np_manager *m, char *out, size_t cap)
 				"{\"player_name\":\"Standalone\",\"player_"
 				"connected\":1,\"power\":1,\"mode\":\"stop\","
 				"\"time\":0,\"duration\":0,\"playlist_tracks\":"
-				"0,\"playlist_cur_index\":0,\"mixer "
+				"0,\"count\":0,\"offset\":0,\"playlist_cur_index\":0,\"mixer "
 				"volume\":50,\"digital_volume_control\":1,"
 				"\"player_needs_upgrade\":0,\"player_is_"
 				"upgrading\":0,\"seq_no\":0}");
@@ -625,7 +625,7 @@ int np_playerstatus_json(np_manager *m, char *out, size_t cap)
 		cap,
 		"{\"player_name\":\"Standalone\",\"player_connected\":1,"
 		"\"power\":1,\"mode\":\"%s\",\"rate\":%d,\"time\":%.3f,"
-		"\"duration\":%.3f,\"playlist_tracks\":1,\"playlist_cur_"
+		"\"duration\":%.3f,\"playlist_tracks\":1,\"count\":1,\"offset\":0,\"playlist_cur_"
 		"index\":0,\"playlist_timestamp\":%llu,\"playlist "
 		"repeat\":0,\"playlist "
 		"shuffle\":0,\"remote\":%d,\"current_title\":\"%s\",\"mixer "

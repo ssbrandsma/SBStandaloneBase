@@ -182,6 +182,8 @@ try:
     data = subscribe(cid)
     assert data["mode"] == "stop"
     assert data["playlist_tracks"] == 0 and data.get("item_loop", []) == []
+    assert data["count"] == 0
+    assert data["offset"] == 0
     status, _ = post({}, "/test/next-track")
     assert status == 404
     request_serverstatus(cid)
@@ -300,6 +302,7 @@ try:
     assert api("POST", "/api/nowplaying/release", {"session_id": token})[0] == 200
     stopped = replacement.next_playerstatus()["data"]
     assert stopped["playlist_tracks"] == 0
+    assert stopped["count"] == 0
     replacement.close()
     stream.close()
 finally:
@@ -314,6 +317,8 @@ try:
     first = subscribe(first_id)
     assert first["mode"] == "play" and first["remote"] == 0
     assert first["playlist_tracks"] == 1 and first["playlist_cur_index"] == 0
+    assert first["count"] == len(first["item_loop"]) == 1
+    assert first["offset"] == 0
     assert len(first["item_loop"]) == 1
     assert first["item_loop"][0]["params"]["track_id"] == "900001"
     assert first["item_loop"][0]["track"] == "Sultans of Swing"

@@ -36,6 +36,7 @@ REQUIRED = {
     "patch-squeezeplay-artwork.sh",
 }
 EXECUTABLES = {
+    "svgpngrenderer",
     "sbbase",
     "sbwebserver",
     "sbproxy",
@@ -255,8 +256,7 @@ def main() -> int:
         # Patch before restart: SlimServer.lua is loaded early in SqueezePlay,
         # before the StandaloneBase applet itself is initialized.
         radio.run(
-            "/usr/share/jive/applets/StandaloneBase/patch-squeezeplay-artwork.sh "
-            "/usr/share/jive/jive/slim/SlimServer.lua"
+            "/usr/share/jive/applets/StandaloneBase/patch-squeezeplay-artwork.sh"
         )
         if not args.no_restart:
             # The native services outlive SqueezePlay, so stop only the PIDs

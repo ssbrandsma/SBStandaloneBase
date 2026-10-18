@@ -12,6 +12,8 @@ local TimeSync = require("applets.StandaloneBase.TimeSync")
 local RemoteBridge = require("applets.StandaloneBase.RemoteBridge")
 local ServerMigration = require("applets.StandaloneBase.ServerMigration")
 local NetworkAddress = require("applets.StandaloneBase.NetworkAddress")
+local ImageRender = require("applets.StandaloneBase.ImageRender")
+local Artwork = require("applets.StandaloneBase.Artwork")
 local io, os, tonumber, tostring = io, os, tonumber, tostring
 local ipairs, pairs, math, pcall, string = ipairs, pairs, math, pcall, string
 local appletManager = appletManager
@@ -27,6 +29,15 @@ local SERVICES = {
     { name="Webserver", exe="sbwebserver", args="--web-root "..ROOT.." --config-dir /mnt/storage/standalonebase" },
 }
 local started = false
+
+function getStandaloneImageURL(self, url, width, height, mime)
+    return ImageRender.artworkUrl(url, width, height, mime)
+end
+
+function getStandaloneArtworkURL(self, url, width, height)
+    return Artwork.route(url, width, height)
+end
+
 local storage = StorageManager:new(ROOT)
 local SETTINGS_DIR = "/etc/squeezeplay/userpath/settings"
 local SERVER_SETTINGS = {
@@ -35,14 +46,13 @@ local SERVER_SETTINGS = {
     "SlimDiscovery.lua",
 }
 local ARTWORK_PATCH = ROOT.."/patch-squeezeplay-artwork.sh"
-local SLIMSERVER_LUA = "/usr/share/jive/jive/slim/SlimServer.lua"
 
-local function patchLoopbackArtwork()
+local function patchArtworkRouting()
     -- On an Applet Installer reboot this prepares the active firmware file for
     -- the next SqueezePlay process. Package deployment runs the same helper
     -- before restarting SqueezePlay, so the change takes effect immediately.
     os.execute("chmod 755 "..ARTWORK_PATCH.." >/dev/null 2>&1")
-    return os.execute(ARTWORK_PATCH.." "..SLIMSERVER_LUA.." >>"..RUN.."/artwork-patch.log 2>&1") == 0
+    return os.execute(ARTWORK_PATCH.." >>"..RUN.."/artwork-patch.log 2>&1") == 0
 end
 
 -- mysqueezebox.com has been retired, but older SqueezePlay builds can retain
@@ -154,9 +164,9 @@ end
 function init(self)
     if started then return end; started=true
     os.execute("mkdir -p "..RUN.." /mnt/storage/standalonebase")
-    os.execute("chmod 755 "..ROOT.."/sb-storage-helper "..ROOT.."/storage-setup.sh "..ROOT.."/storage-boot.sh >/dev/null 2>&1")
+    os.execute("chmod 755 "..ROOT.."/svgpngrenderer "..ROOT.."/sb-storage-helper "..ROOT.."/storage-setup.sh "..ROOT.."/storage-boot.sh >/dev/null 2>&1")
     redirectBootstrapServer()
-    patchLoopbackArtwork()
+    patchArtworkRouting()
     suppressRetiredCloudServer()
     self.failures={}; self.backoff={}
     launch(SERVICES[1])
@@ -190,7 +200,7 @@ function menu(self)
     for _,s in ipairs(SERVICES) do menu:addItem({text=s.name..": "..(alive(s) and "Running" or "Stopped")}) end
     menu:addItem({text="Extended Storage",callback=function() self:storageMenu() end})
     menu:addItem({text="Web Access",callback=function() if not self.remoteBridge:isInjecting() then self:webAccessMenu() end end})
-	menu:addItem({text="Version: 0.4.0"})
+	menu:addItem({text="Version: 0.4.4"})
     window:addWidget(menu); window:show()
 end
 function webAccessMenu(self)

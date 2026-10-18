@@ -17,6 +17,10 @@ add_test(NAME extended_storage COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/storage/te
   ${CMAKE_SOURCE_DIR}/artifacts/ubi/sbdata-empty.ubifs)
 find_program(LUA_EXECUTABLE NAMES lua lua5.1)
 if(LUA_EXECUTABLE)
+  add_test(NAME artwork_lua COMMAND ${LUA_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/images/test_artwork.lua ${CMAKE_SOURCE_DIR})
+  add_test(NAME image_helper_lua COMMAND ${LUA_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/images/test_image_helper.lua ${CMAKE_SOURCE_DIR})
   add_test(NAME extended_storage_lua_state COMMAND ${LUA_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/storage/test_extended_storage_state.lua
     ${CMAKE_SOURCE_DIR}/applet)
@@ -44,6 +48,37 @@ endif()
 if(NOT WIN32)
   find_package(Python3 COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
+    add_executable(test_public_address images/test_public_address.c)
+    add_test(NAME image_public_address COMMAND test_public_address)
+    add_test(NAME svg_renderer COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/images/test_renderer.py $<TARGET_FILE:svgpngrenderer>)
+    add_test(NAME svg_image_http COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/images/test_image_http.py $<TARGET_FILE:sbwebserver>
+      $<TARGET_FILE:svgpngrenderer> ${CMAKE_SOURCE_DIR}/native/sbwebserver/web)
+    if(TARGET sbproxy)
+      find_package(CURL REQUIRED)
+      find_package(Threads REQUIRED)
+      add_executable(sbproxy_test ../native/sbproxy/sbproxy.c
+        ../native/sbproxy/hls_playlist.c ../native/sbproxy/hls_audio.c ../native/sbproxy/hls_relay.c
+        ../native/sbproxy/hls_id3.c ../native/sbproxy/hls_metadata.c)
+      target_compile_definitions(sbproxy_test PRIVATE _GNU_SOURCE SB_PROXY_TESTING)
+      target_link_libraries(sbproxy_test PRIVATE CURL::libcurl Threads::Threads)
+      add_executable(test_hls images/test_hls.c ../native/sbproxy/hls_playlist.c ../native/sbproxy/hls_audio.c ../native/sbproxy/hls_id3.c)
+      add_executable(test_hls_id3 images/test_hls_id3.c ../native/sbproxy/hls_id3.c)
+      add_test(NAME hls_id3 COMMAND test_hls_id3)
+      add_executable(test_hls_wait images/test_hls_wait.c)
+      target_link_libraries(test_hls_wait PRIVATE Threads::Threads)
+      add_test(NAME hls_metadata_wait COMMAND test_hls_wait)
+      target_link_libraries(test_hls PRIVATE CURL::libcurl)
+      add_test(NAME hls_native COMMAND test_hls)
+      add_test(NAME hls_streaming COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/images/test_hls_http.py $<TARGET_FILE:sbproxy_test>)
+      set_tests_properties(hls_streaming PROPERTIES ENVIRONMENT "SB_HLS_TEST_TIMEOUT=1")
+      add_test(NAME artwork_proxy_streaming COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/images/test_artwork_proxy.py $<TARGET_FILE:sbproxy_test>)
+      add_test(NAME image_proxy_guard COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/images/test_proxy_guard.py $<TARGET_FILE:sbproxy>)
+    endif()
     add_test(NAME comet_connections COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/comet/test_connections.py $<TARGET_FILE:sbbase>)
     add_test(NAME comet_menustatus COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/comet/test_menustatus.py $<TARGET_FILE:sbbase>)
     add_test(NAME nowplaying_poc COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/comet/test_nowplaying.py $<TARGET_FILE:sbbase>)
@@ -55,5 +90,7 @@ if(NOT WIN32)
     add_test(NAME web_access_pairing COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/auth/test_web_pairing.py $<TARGET_FILE:sbwebserver> ${CMAKE_SOURCE_DIR}/native/sbwebserver/web)
     add_test(NAME system_log_viewer COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/logs/test_logs_http.py $<TARGET_FILE:sbwebserver> ${CMAKE_SOURCE_DIR}/native/sbwebserver/web)
     add_test(NAME process_monitor COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/monitor/test_monitor_http.py $<TARGET_FILE:sbwebserver> ${CMAKE_SOURCE_DIR}/native/sbwebserver/web)
+    add_test(NAME cpu_accounting_diagnostic COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/monitor/test_cpu_diagnostic.py)
   endif()
 endif()

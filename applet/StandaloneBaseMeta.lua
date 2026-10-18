@@ -10,6 +10,8 @@ function defaultSettings(meta) return { enabled = true } end
 function registerApplet(meta)
     meta:registerService("getStandaloneStorageInfo")
     meta:registerService("getStandaloneStorageCompatibility")
+    meta:registerService("getStandaloneImageURL")
+    meta:registerService("getStandaloneArtworkURL")
     local applet = appletManager:loadApplet("StandaloneBase")
     jiveMain:addItem(meta:menuItem("standaloneBase", "home", "STANDALONE_BASE",
         function() applet:menu() end, 90))

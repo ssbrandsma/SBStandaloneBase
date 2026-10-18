@@ -12,28 +12,32 @@ test -r "$config" || {
 : "${BASE_ROOT:?}" "${MERGED_XML:?}" "${BOOTSTRAP_CONFIG:?}"
 : "${WEB_OWNER:?}" "${BOOTSTRAP_OWNER:?}" "${CONTAINER_NAME:?}"
 
-version=0.4.0
-expected_sha=6c831f57d422fea64e08a85fe3562ee1800466fa
+version=${SB_RELEASE_VERSION:-0.4.4}
+expected_sha=${SB_RELEASE_SHA1:-c481883670f928d28a1387c469f5cb5013f9faa5}
+release_dir=${SB_RELEASE_STAGE:-/tmp}
 stamp=$(date +%Y%m%d-%H%M%S)
 base_root=$BASE_ROOT
 merged_xml=$MERGED_XML
 bootstrap_config=$BOOTSTRAP_CONFIG
 
-test "$(sha1sum "/tmp/StandaloneBase-$version.zip" | cut -d' ' -f1)" = "$expected_sha"
-python3 -m json.tool "/tmp/squeezebox-config-standalonebase-$version.json" >/dev/null
-python3 -c "import xml.etree.ElementTree as E; E.parse('/tmp/standalonebase-extensions-$version.xml'); E.parse('/tmp/merged-extensions-standalonebase-$version.xml')"
+test "$(sha1sum "$release_dir/StandaloneBase-$version.zip" | cut -d' ' -f1)" = "$expected_sha"
+python3 -m json.tool "$release_dir/squeezebox-config-standalonebase-$version.json" >/dev/null
+python3 -c "import xml.etree.ElementTree as E; E.parse('$release_dir/standalonebase-extensions-$version.xml'); E.parse('$release_dir/merged-extensions-standalonebase-$version.xml')"
 
 cp -p "$merged_xml" "$merged_xml.bak.$stamp"
 cp -p "$bootstrap_config" "$bootstrap_config.bak.$stamp"
 if test -f "$base_root/extensions.xml"; then
     cp -p "$base_root/extensions.xml" "$base_root/extensions.xml.bak.$stamp"
 fi
+if test -f "$base_root/StandaloneBase-$version.zip"; then
+    cp -p "$base_root/StandaloneBase-$version.zip" "$base_root/StandaloneBase-$version.zip.bak.$stamp"
+fi
 mkdir -p "$base_root"
 
-install -o root -g root -m 0644 "/tmp/StandaloneBase-$version.zip" "$base_root/StandaloneBase-$version.zip"
-install -o root -g root -m 0644 "/tmp/standalonebase-extensions-$version.xml" "$base_root/extensions.xml"
-install -o "$WEB_OWNER" -g "$WEB_OWNER" -m 0644 "/tmp/merged-extensions-standalonebase-$version.xml" "$merged_xml"
-install -o "$BOOTSTRAP_OWNER" -g "$BOOTSTRAP_OWNER" -m 0644 "/tmp/squeezebox-config-standalonebase-$version.json" "$bootstrap_config"
+install -o root -g root -m 0644 "$release_dir/StandaloneBase-$version.zip" "$base_root/StandaloneBase-$version.zip"
+install -o root -g root -m 0644 "$release_dir/standalonebase-extensions-$version.xml" "$base_root/extensions.xml"
+install -o "$WEB_OWNER" -g "$WEB_OWNER" -m 0644 "$release_dir/merged-extensions-standalonebase-$version.xml" "$merged_xml"
+install -o "$BOOTSTRAP_OWNER" -g "$BOOTSTRAP_OWNER" -m 0644 "$release_dir/squeezebox-config-standalonebase-$version.json" "$bootstrap_config"
 
 test "$(sha1sum "$base_root/StandaloneBase-$version.zip" | cut -d' ' -f1)" = "$expected_sha"
 docker restart "$CONTAINER_NAME" >/dev/null

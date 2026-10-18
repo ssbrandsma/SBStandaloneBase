@@ -6,6 +6,11 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 target="$tmp/SlimServer.lua"
 
 cat >"$target" <<'EOF'
+local function _getArtworkThumbSink(self, cacheKey, size, url)
+  return function() end
+end
+function processArtworkQueue(self)
+end
 function fetchArtwork(iconId)
 	if string.find(iconId, "^http") then
 		if string.find(iconId, "^http://%d") and (
@@ -25,9 +30,10 @@ cp "$target" "$tmp/original.lua"
 sh "$patcher" "$target" >/dev/null
 test -f "$target.pre-standalonebase"
 cmp "$target.pre-standalonebase" "$tmp/original.lua"
-grep -Fq 'StandaloneBase loopback artwork' "$target"
-grep -Fq 'string.find(iconId, "^http://127%.0%.0%.1[:/]") or' "$target"
-grep -Fq 'string.find(iconId, "^http://localhost[:/]")' "$target"
+grep -Fq 'StandaloneBase artwork routing v2' "$target"
+grep -Fq '.route(iconId, sizeW, sizeH)' "$target"
+grep -Fq '.sink(self, cacheKey, size, url, _loadArtworkImage)' "$target"
+! grep -q '/public/imageproxy' "$target"
 
 cp "$target" "$tmp/patched.lua"
 sh "$patcher" "$target" >/dev/null
@@ -65,7 +71,7 @@ if string.find(iconId, "127%.0%.0%.1") or string.find(iconId, "localhost") then
 end
 EOF
 cp "$tmp/native.lua" "$tmp/native.original"
-sh "$patcher" "$tmp/native.lua" | grep -Fq 'native loopback support present; not needed'
+sh "$patcher" "$tmp/native.lua" | grep -Fq 'legacy imageproxy absent; not needed'
 cmp "$tmp/native.lua" "$tmp/native.original"
 test ! -e "$tmp/native.lua.pre-standalonebase"
 
@@ -85,5 +91,27 @@ else
 fi
 cmp "$tmp/alternative.lua" "$tmp/alternative.original"
 test ! -e "$tmp/alternative.lua.pre-standalonebase"
+
+# The independent viewer must classify HTTPS before the old HTTP-only logic.
+cat >"$tmp/viewer.lua" <<'EOF'
+function requestImage(self, imageData)
+  local urlString = imageData.image
+  if string.find(urlString, "^http://%d") and (
+    string.find(urlString, "^http://10%.")
+  ) then
+  elseif not string.find(urlString, "^http://") then
+    urlString = "lms-relative:" .. urlString
+  else
+    urlString = 'http://' .. jnt:getSNHostname() .. '/public/imageproxy?w=' .. screenWidth
+  end
+end
+EOF
+sh "$patcher" "$tmp/viewer.lua"
+grep -Fq 'if string.match(urlString, "^https?://") then' "$tmp/viewer.lua"
+grep -Fq '.route(urlString, screenWidth, screenHeight)' "$tmp/viewer.lua"
+! grep -q '/public/imageproxy' "$tmp/viewer.lua"
+cp "$tmp/viewer.lua" "$tmp/viewer.once"
+sh "$patcher" "$tmp/viewer.lua"
+cmp "$tmp/viewer.once" "$tmp/viewer.lua"
 
 echo artwork-patch-tests-ok
