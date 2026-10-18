@@ -51,7 +51,7 @@ To produce another version, update:
 - zipfile in [build-package.sh (line 13)]
 - The displayed version in [StandaloneBaseApplet.lua]
 - Native version constants in [sbbase.h (line 10)]and [sbproxy.c (line 19)]
-- standalone_base_version in the ignored `.local/config.json`
+- standalone_base_version in the tracked root `config.json`; update its applet versions, public download URLs and ZIP checksums when publishing applets
 
 
 ## deploy remote

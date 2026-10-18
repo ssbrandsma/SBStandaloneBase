@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-config=${SB_PACKAGE_CONFIG:-$root/.local/config.json}
-test -f "$config" || { echo "missing local package catalog: $config" >&2; exit 1; }
+config=${SB_PACKAGE_CONFIG:-$root/config.json}
+test -f "$config" || { echo "missing package catalog: $config" >&2; exit 1; }
 module="$root/artifacts/sbubifs-authorized.ko"
 expected_sha=63652ce67df06a78abb84a4986253bdab02fbd7b7c000779c60b3d393ba9566b
 image="$root/artifacts/ubi/sbdata-empty.ubifs"

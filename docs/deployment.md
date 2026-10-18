@@ -4,18 +4,20 @@ Build all ARM binaries, run host and QEMU checks, then create the ZIP. Publish n
 
 Installation copies the applet to `/usr/share/jive/applets/StandaloneBase`. On initialization it creates `/mnt/storage/standalonebase` and `/tmp/standalonebase`, starts the three services, migrates the configured bootstrap endpoint to the local service, and reports observed process state in **Standalone Base**.
 
-The package build embeds the ignored `.local/config.json`, which provides the
-deployment-specific offline applet catalog. The repository intentionally does
-not publish that catalog or its download endpoints. On first boot the packaged
+The package build embeds the tracked root `config.json`, which is the public
+applet catalog published on GitHub's `master` branch. It contains public ZIP
+download URLs, versions and checksums, plus device-local server defaults;
+it must not contain SSH credentials, hosting paths or container settings.
+On first boot the packaged
 catalog is copied to `/mnt/storage/standalonebase/config.json`; `sbbase` reads
 that file and returns its entries for the Applet Installer `jiveapplets`
 request. Catalog updates must be supplied through the authenticated management
-interface or another explicitly configured private distribution channel.
+interface or another explicitly configured distribution channel. Publishing
+the GitHub file does not by itself add an automatic GitHub fetch to the service.
 
-An ignored root `config.json` may be kept as a convenient local mirror of
-`.local/config.json`. Keep the two synchronized when updating release versions,
-download URLs, and ZIP SHA-1 values. The package builder reads `.local/config.json`
-by default, not the root mirror. Neither populated file should be added to Git.
+Update the tracked `config.json` when releasing applets. A private alternative
+may remain under `.local/`; select it explicitly with PowerShell `-ConfigPath`
+or shell `SB_PACKAGE_CONFIG`. Private deployment configuration remains ignored.
 The remote bootstrap catalog remains Base-only; the embedded local catalog
 contains Standalone Radio, Spotify Connect, and Qobuz Connect for installation
 after Base switches the Radio to its local service.

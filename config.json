@@ -1,0 +1,55 @@
+{
+  "catalog_version": "1",
+  "standalone_base_version": "0.4.4",
+  "server": {
+    "name": "Standalone Base",
+    "uuid": "9d989f40-499a-4b85-b92f-8dc415af2a04",
+    "host": "127.0.0.1",
+    "advertise_ip": "127.0.0.1",
+    "http_port": 9000,
+    "slimproto_port": 3483,
+    "discovery_port": 3483,
+    "version": "7.999.999"
+  },
+  "applets": [
+    {
+      "name": "StandaloneRadio",
+      "title": "Standalone Radio",
+      "version": "0.9.6",
+      "target": "baby",
+      "min_target_version": "7.7",
+      "url": "http://49.12.198.91/sbstandalone/StandaloneRadio-0.9.6.zip",
+      "sha": "913ce2ba4f5b57d09663d0f9a08a15e229c6112a",
+      "desc": "Standalone internet radio playback for Logitech Squeezebox Radio.",
+      "changes": "Improve RadioFeeds search, playlist resolution, HLS playback and metadata, and station artwork.",
+      "creator": "Sjoerd Brandsma",
+      "email": ""
+    },
+    {
+      "name": "SpotifyConnect",
+      "title": "Spotify Connect",
+      "version": "0.6.2",
+      "target": "baby",
+      "min_target_version": "7.7",
+      "url": "http://49.12.198.91/sbspotifyconnect/SpotifyConnect-0.6.2.zip",
+      "sha": "d6edaa67a6e6affaf61e96732a34a9877dcb11ae",
+      "desc": "Standalone Spotify Connect playback for Logitech Squeezebox Radio.",
+      "changes": "Add Disabled, Manual, and Always On Spotify service lifecycle modes with safe recovery.",
+      "creator": "Sjoerd Brandsma",
+      "email": ""
+    },
+    {
+      "name": "QobuzConnect",
+      "title": "Qobuz Connect",
+      "version": "0.1.2",
+      "target": "baby",
+      "min_target_version": "7.7.3",
+      "url": "http://49.12.198.91/sbqobuzconnect/QobuzConnect-0.1.2.zip",
+      "sha": "f1f24a4e377e6b6ee3e95d82b0c536a23f6e7b1e",
+      "desc": "Qobuz Connect playback for Logitech Squeezebox Radio. Requires StandaloneBase.",
+      "changes": "Adds Disabled, Manual and Always On lifecycle modes with safe supervision and detailed status.",
+      "creator": "Sjoerd Brandsma",
+      "email": ""
+    }
+  ]
+}

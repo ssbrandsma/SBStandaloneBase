@@ -6,8 +6,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path $PSScriptRoot -Parent
-$LocalDirectory = Join-Path $Root '.local'
-if (-not $ConfigPath) { $ConfigPath = Join-Path $LocalDirectory 'config.json' }
+if (-not $ConfigPath) { $ConfigPath = Join-Path $Root 'config.json' }
 if (-not $BaseUrl) { throw 'Set SB_RELEASE_BASE_URL or pass -BaseUrl; deployment endpoints are intentionally not stored in Git.' }
 $Version = '0.4.4'
 $ModuleSize = 199119
