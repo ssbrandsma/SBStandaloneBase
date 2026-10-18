@@ -45,5 +45,7 @@ int repo_commit_upload(const char *temporary,
 int repo_package_path(const char *id, char *path, size_t cap);
 int repo_is_local_url(const char *url);
 void repo_notify_catalog(void);
+int repo_merge_catalog(const char *json, size_t length, int *changed,
+		       char *error, size_t error_size);
 
 #endif

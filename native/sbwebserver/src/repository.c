@@ -4,6 +4,8 @@
  * Validates catalog edits and uploads, selects storage and publishes package
  * downloads through http_server.c. The resulting catalog is also read by
  * sbbase to supply Jive's LMS-compatible Applet Installer responses.
+ * catalog_sync.c uses its transactional merge to import newer GitHub release
+ * entries without replacing device settings, custom applets or local ZIPs.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -507,6 +509,354 @@ static void unlock_config(int fd)
 	flock(fd, LOCK_UN);
 #endif
 	close(fd);
+}
+
+/* Remote release metadata is deliberately separate from runtime settings. */
+typedef struct {
+	struct mg_str object;
+	char name[65], target[33], version[33], url[513];
+	int pinned;
+} CatalogEntry;
+
+static const char *release_fields[] = {
+	"name", "title", "version", "target", "min_target_version", "url",
+	"sha", "desc", "changes", "creator", "email"
+};
+
+/** Return a release field index, or -1 for a local-only extension field. */
+static int release_field(const char *name)
+{
+	for (unsigned i = 0; i < sizeof release_fields / sizeof *release_fields; i++)
+		if (!strcmp(name, release_fields[i]))
+			return (int)i;
+	return -1;
+}
+
+/** Disallow embedded NULs in metadata decoded into bounded C strings. */
+static int catalog_string_nul(struct mg_str value)
+{
+	for (size_t i = 0; i < value.len; i++) {
+		if (value.buf[i] != '\\')
+			continue;
+		i++;
+		if (i + 4 < value.len && value.buf[i] == 'u' &&
+		    !memcmp(value.buf + i + 1, "0000", 4))
+			return 1;
+	}
+	return 0;
+}
+
+/** Validate a complete object and select its unique top-level applets array. */
+static int catalog_array(struct mg_str json, struct mg_str *array)
+{
+	int length = 0, offset = mg_json_get(json, "$", &length), found = 0;
+	struct mg_str key, value;
+	size_t position = 0;
+	int string = 0, escape = 0;
+	char previous = 0;
+
+	/* Mongoose tolerates trailing commas; persisted catalogs must not. */
+	for (size_t i = 0; i < json.len; i++) {
+		unsigned char c = (unsigned char)json.buf[i];
+		if (string) {
+			if (c < 32)
+				return -1;
+			if (escape)
+				escape = 0;
+			else if (c == '\\')
+				escape = 1;
+			else if (c == '"')
+				string = 0;
+		} else {
+			if ((c == '}' || c == ']') && previous == ',')
+				return -1;
+			if (c == '"')
+				string = 1;
+		}
+		if (!isspace(c))
+			previous = (char)c;
+	}
+
+	if (offset < 0 || length < 2 || json.buf[offset] != '{' ||
+	    memchr(json.buf, 0, json.len))
+		return -1;
+	for (size_t i = (size_t)(offset + length); i < json.len; i++)
+		if (!isspace((unsigned char)json.buf[i]))
+			return -1;
+	json = mg_str_n(json.buf + offset, (size_t)length);
+	while ((position = mg_json_next(json, position, &key, &value))) {
+		char *name = mg_json_get_str(key, "$");
+		if (!name)
+			return -1;
+		if (!strcmp(name, "applets")) {
+			if (found++ || !value.len || value.buf[0] != '[') {
+				free(name);
+				return -1;
+			}
+			*array = value;
+		}
+		free(name);
+	}
+	return found == 1 ? 0 : -1;
+}
+
+/** Parse bounded entries; remote fields must be known, untruncated strings. */
+static int catalog_entries(struct mg_str array, CatalogEntry *entries,
+			   int *count, int remote)
+{
+	struct mg_str object, key, value;
+	size_t position = 0;
+	int total = 0;
+
+	while ((position = mg_json_next(array, position, NULL, &object))) {
+		RepoApplet item = {0};
+		char *fields[] = {item.name, item.title, item.version, item.target,
+			item.min_target_version, item.url, item.sha, item.desc,
+			item.changes, item.creator, item.email};
+		size_t sizes[] = {sizeof item.name, sizeof item.title,
+			sizeof item.version, sizeof item.target,
+			sizeof item.min_target_version, sizeof item.url,
+			sizeof item.sha, sizeof item.desc, sizeof item.changes,
+			sizeof item.creator, sizeof item.email};
+		unsigned seen = 0;
+		size_t field_position = 0;
+
+		if (total == REPO_MAX_APPLETS || !object.len || object.buf[0] != '{')
+			return -1;
+		while ((field_position = mg_json_next(object, field_position, &key, &value))) {
+			char *name = mg_json_get_str(key, "$");
+			int field = name ? release_field(name) : -1;
+			free(name);
+			if (field < 0) {
+				if (remote)
+					return -1;
+				continue;
+			}
+			char *text = mg_json_get_str(value, "$");
+			if (!text || catalog_string_nul(value) || strlen(text) >= sizes[field] ||
+			    (seen & (1u << field))) {
+				free(text);
+				return -1;
+			}
+			seen |= 1u << field;
+			strcpy(fields[field], text);
+			free(text);
+		}
+		if (!safe_name(item.name) || !item.target[0] || !safe_version(item.version) ||
+		    (remote && (repo_validate_metadata(&item, 1, NULL, 0) ||
+				 repo_is_local_url(item.url))))
+			return -1;
+		if (remote) {
+			for (const unsigned char *p = (unsigned char *)item.url; *p; p++)
+				if (*p <= 32 || *p == 127)
+					return -1;
+			const char *authority = strstr(item.url, "://") + 3;
+			if (!*authority || strchr("/?#", *authority))
+				return -1;
+			for (const char *p = authority; *p && !strchr("/?#", *p); p++)
+				if (*p == '@')
+					return -1;
+		}
+		for (int i = 0; i < total; i++)
+			if (!strcmp(entries[i].name, item.name) &&
+			    !strcmp(entries[i].target, item.target))
+				return -1;
+		CatalogEntry *entry = &entries[total++];
+		entry->object = object;
+		strcpy(entry->name, item.name);
+		strcpy(entry->target, item.target);
+		strcpy(entry->version, item.version);
+		strcpy(entry->url, item.url);
+		bool pin = false;
+		mg_json_get_bool(object, "$.catalog_pin", &pin);
+		entry->pinned = pin || repo_is_local_url(item.url);
+	}
+	*count = total;
+	return 0;
+}
+
+/** Compare dotted numeric releases without integer overflow; -2 means custom. */
+static int release_compare(const char *a, const char *b)
+{
+	if (!isdigit((unsigned char)*a) || !isdigit((unsigned char)*b))
+		return -2;
+	for (const char *s = a; *s; s++)
+		if ((!isdigit((unsigned char)*s) && *s != '.') ||
+		    (*s == '.' && !isdigit((unsigned char)s[1])))
+			return -2;
+	for (const char *s = b; *s; s++)
+		if ((!isdigit((unsigned char)*s) && *s != '.') ||
+		    (*s == '.' && !isdigit((unsigned char)s[1])))
+			return -2;
+	while (*a || *b) {
+		const char *ae = a, *be = b;
+		while (isdigit((unsigned char)*ae)) ae++;
+		while (isdigit((unsigned char)*be)) be++;
+		while (a < ae && *a == '0') a++;
+		while (b < be && *b == '0') b++;
+		if (ae - a != be - b)
+			return ae - a > be - b ? 1 : -1;
+		int order = memcmp(a, b, (size_t)(ae - a));
+		if (order)
+			return order > 0 ? 1 : -1;
+		a = *ae ? ae + 1 : ae;
+		b = *be ? be + 1 : be;
+	}
+	return 0;
+}
+
+/** Append raw JSON into the native service's bounded catalog envelope. */
+static int catalog_append(char *out, size_t *used, struct mg_str text)
+{
+	if (text.len > 65535u - *used)
+		return -1;
+	memcpy(out + *used, text.buf, text.len);
+	*used += text.len;
+	out[*used] = 0;
+	return 0;
+}
+
+/** Replace release fields while retaining unknown local per-applet settings. */
+static int catalog_replace(char *out, size_t *used,
+			   struct mg_str local, struct mg_str remote)
+{
+	struct mg_str key, value;
+	size_t position = 0;
+	if (catalog_append(out, used, mg_str_n(remote.buf, remote.len - 1)))
+		return -1;
+	while ((position = mg_json_next(local, position, &key, &value))) {
+		char *name = mg_json_get_str(key, "$");
+		int known = name ? release_field(name) : -1;
+		free(name);
+		if (known >= 0)
+			continue;
+		if (catalog_append(out, used, mg_str(",")) ||
+		    catalog_append(out, used, key) ||
+		    catalog_append(out, used, mg_str(":")) ||
+		    catalog_append(out, used, value))
+			return -1;
+	}
+	return catalog_append(out, used, mg_str("}"));
+}
+
+/** Atomically commit a changed catalog, preserving mode and closing on errors. */
+static int catalog_commit(const char *data, size_t length)
+{
+	char path[600];
+	struct stat st;
+	snprintf(path, sizeof path, "%s.refresh.XXXXXX", repo_config_path());
+	int fd = mkstemp(path), failed = 0;
+	if (fd < 0)
+		return -1;
+	if (!stat(repo_config_path(), &st) && fchmod(fd, st.st_mode & 0777))
+		failed = 1;
+	FILE *stream = fdopen(fd, "wb");
+	if (!stream) {
+		close(fd);
+		unlink(path);
+		return -1;
+	}
+	if (fwrite(data, 1, length, stream) != length || fflush(stream) || fsync(fd))
+		failed = 1;
+	if (fclose(stream))
+		failed = 1;
+	if (failed || rename(path, repo_config_path())) {
+		unlink(path);
+		return -1;
+	}
+	fd = open(config_dir(), O_RDONLY);
+	if (fd >= 0) {
+		fsync(fd);
+		close(fd);
+	}
+	return 0;
+}
+
+/** Merge upstream releases only; retain settings, pins and newer/custom builds.
+ * @param json Remote UTF-8 catalog bytes, not necessarily NUL terminated.
+ * @param length Remote byte count (at most 16 KiB).
+ * @param changed Receives number of added or upgraded entries.
+ * @param error Receives a generic error, if supplied.
+ * @param error_size Capacity of error.
+ * @return Zero on success (including no change); -1 leaves the catalog intact.
+ */
+int repo_merge_catalog(const char *json, size_t length, int *changed,
+		       char *error, size_t error_size)
+{
+	struct mg_str remote_array, local_array;
+	CatalogEntry *entries = calloc(REPO_MAX_APPLETS * 2, sizeof *entries);
+	CatalogEntry *upstream = entries, *local = entries ? entries + REPO_MAX_APPLETS : NULL;
+	char *original = NULL, *out = NULL;
+	size_t original_size, used = 0, array_start;
+	int remote_count, local_count, changes = 0, lock = -1, rc = -1;
+	unsigned consumed = 0;
+
+	*changed = 0;
+	if (!entries || !json || length > 16384 ||
+	    catalog_array(mg_str_n(json, length), &remote_array) ||
+	    catalog_entries(remote_array, upstream, &remote_count, 1) || !remote_count)
+		goto done;
+	lock = lock_config();
+	if (lock < 0)
+		goto done;
+	original = read_file(repo_config_path(), &original_size);
+	if (!original || original_size > 65535 ||
+	    catalog_array(mg_str_n(original, original_size), &local_array) ||
+	    catalog_entries(local_array, local, &local_count, 0) ||
+	    !(out = malloc(65536)))
+		goto done;
+	if (catalog_append(out, &used, mg_str_n(original, (size_t)(local_array.buf - original))) ||
+	    catalog_append(out, &used, mg_str("[")))
+		goto done;
+	array_start = used;
+	for (int i = 0; i < local_count; i++) {
+		int match = -1;
+		for (int j = 0; j < remote_count; j++)
+			if (!strcmp(local[i].name, upstream[j].name) &&
+			    !strcmp(local[i].target, upstream[j].target))
+				match = j;
+		if (i && catalog_append(out, &used, mg_str(",")))
+			goto done;
+		if (match >= 0)
+			consumed |= 1u << match;
+		if (match >= 0 && !local[i].pinned &&
+		    release_compare(upstream[match].version, local[i].version) == 1) {
+			if (catalog_replace(out, &used, local[i].object, upstream[match].object))
+				goto done;
+			changes++;
+		} else if (catalog_append(out, &used, local[i].object))
+			goto done;
+	}
+	for (int j = 0; j < remote_count; j++) {
+		if (consumed & (1u << j))
+			continue;
+		if (local_count == REPO_MAX_APPLETS ||
+		    (local_count && catalog_append(out, &used, mg_str(","))) ||
+		    catalog_append(out, &used, upstream[j].object))
+			goto done;
+		local_count++;
+		changes++;
+	}
+	/* sbbase's installer response is bounded at 16 KiB. */
+	if (used - array_start > 15000 ||
+	    catalog_append(out, &used, mg_str("]")) ||
+	    catalog_append(out, &used, mg_str_n(local_array.buf + local_array.len,
+		original_size - (size_t)(local_array.buf + local_array.len - original))) ||
+	    (changes && catalog_commit(out, used)))
+		goto done;
+	*changed = changes;
+	rc = 0;
+done:
+	if (rc)
+		err(error, error_size, "Catalog validation, capacity or storage failure");
+	if (lock >= 0)
+		unlock_config(lock);
+	free(entries);
+	free(original);
+	free(out);
+	if (!rc && changes)
+		repo_notify_catalog();
+	return rc;
 }
 
 /**

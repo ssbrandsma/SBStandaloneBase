@@ -15,9 +15,35 @@ async function settings(){const [s,a]=await Promise.all([load(url.settings),load
 const defs=[['name','Internal name'],['title','Title'],['version','Version'],['target','Target'],['min_target_version','Minimum target version'],['desc','Description'],['changes','Changes'],['creator','Creator'],['email','Email']];
 function fields(x={}){return defs.map(([k,l])=>'<div class="form-row"><label>'+l+'</label><input name="'+k+'" maxlength="'+(k==='desc'||k==='changes'?512:128)+'" '+(k==='name'?'pattern="[A-Za-z][A-Za-z0-9_-]*" title="Letters, digits, underscore and hyphen only; no spaces"':'')+' value="'+esc(x[k]??(k==='target'?'baby':k==='min_target_version'?'7.7':''))+'"></div>').join('')}
 function values(f){return Object.fromEntries([...f.querySelectorAll('[name]')].filter(x=>x.name!=='package').map(x=>[x.name,x.value.trim()]))}
+async function catalogControls() {
+ const heading=app.querySelector('h2');
+ if(!heading||heading.textContent!=='Applet Repository')return;
+ const section=document.createElement('section');
+ section.className='card';
+ section.innerHTML='<h3>GitHub release catalog</h3><p>Merge newer releases without changing local settings or uploaded ZIPs.</p><button id="catalog-refresh">Check for updates</button><p id="catalog-status" role="status"></p>';
+ heading.after(section);
+ const button=section.querySelector('button'),message=section.querySelector('[role=status]');
+ try{const status=await load('/api/catalog/status');if(section.isConnected)message.textContent=status.message}catch(error){if(section.isConnected)message.textContent=error.message}
+ button.onclick=async()=>{
+  button.disabled=true;
+  try{
+   await write('/api/catalog/refresh',{method:'POST'});
+   for(let attempt=0;attempt<30;attempt++){
+    if(!section.isConnected)return;
+    const status=await load('/api/catalog/status');
+    if(!section.isConnected)return;
+    message.textContent=status.message;
+    if(!status.busy){if(status.state==='ok')await applets();return}
+    await new Promise(resolve=>setTimeout(resolve,1000));
+   }
+   message.textContent='Refresh continues in the background. Reopen this tab to check its result.';
+  }catch(error){if(section.isConnected)message.textContent=error.message}
+  finally{if(section.isConnected)button.disabled=false}
+ };
+}
 async function applets(){const d=await load(url.applets);app.innerHTML='<h2>Applet Repository</h2><p>Uploading makes a package available to the Logitech Applet Installer; it does not install it.</p>'+(!d.storage_active?'<div class="notice error">There is not enough writable storage for a local ZIP upload.</div>':'')+'<section class="card"><h3>Catalog</h3><div class="table-wrap"><table><thead><tr><th>Title</th><th>Name</th><th>Version</th><th>Target</th><th>Source</th><th>SHA-1</th><th>Actions</th></tr></thead><tbody>'+d.applets.map((x,i)=>'<tr><td>'+esc(x.title)+'</td><td>'+esc(x.name)+'</td><td>'+esc(x.version)+'</td><td>'+esc(x.target)+'</td><td><span class="badge '+(x.source==='local'?'':'off')+'">'+esc(x.source)+'</span></td><td><code class="digest">'+esc(x.sha)+'</code></td><td><button data-edit="'+i+'">Edit</button> <button class="danger" data-remove="'+i+'">Remove</button>'+(x.source==='local'?' <a class="button" href="'+esc(x.url)+'">ZIP</a>':'')+'</td></tr>').join('')+'</tbody></table></div></section><section class="card"><h3>Upload applet ZIP</h3><form id="upload-form"><div class="form-row"><label>ZIP package</label><input name="package" type="file" accept=".zip" required></div>'+fields()+'<button '+(d.storage_active?'':'disabled')+'>Validate and add</button><progress id="progress" max="100" hidden></progress><div id="message"></div></form></section>';
  const f=document.querySelector('#upload-form'),msg=document.querySelector('#message'),p=document.querySelector('#progress');f.package.onchange=()=>{const m=f.package.files[0]?.name.match(/^([A-Za-z][A-Za-z0-9_-]*)-([A-Za-z0-9._+-]+)\.zip$/i);if(m){if(!f.elements.name.value)f.elements.name.value=m[1];if(!f.elements.version.value)f.elements.version.value=m[2]}};f.onsubmit=e=>{e.preventDefault();const file=f.package.files[0];if(!file)return;const fd=new FormData;fd.append('package',file,file.name);const xhr=new XMLHttpRequest;xhr.open('POST',url.applets+'/upload?'+new URLSearchParams(values(f)));p.hidden=false;xhr.upload.onprogress=e=>{if(e.lengthComputable)p.value=e.loaded*100/e.total};xhr.onload=()=>{let j={};try{j=JSON.parse(xhr.responseText)}catch(e){}if(xhr.status===401){pairingPage();return}if(xhr.status>=200&&xhr.status<300)applets();else{msg.className='notice error';msg.textContent=j.error||'Upload failed'}};xhr.onerror=()=>{msg.className='notice error';msg.textContent='Upload connection failed'};xhr.send(fd)};
- app.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editApplet(d.applets[+b.dataset.edit]));app.querySelectorAll('[data-remove]').forEach(b=>b.onclick=async()=>{const x=d.applets[+b.dataset.remove];if(confirm('Remove '+x.title+' from the catalog? This does not uninstall it.')){await write('/api/applets/'+encodeURIComponent(x.name)+'?delete_package='+(x.source==='local'?1:0),{method:'DELETE'});applets()}})}
+ app.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editApplet(d.applets[+b.dataset.edit]));app.querySelectorAll('[data-remove]').forEach(b=>b.onclick=async()=>{const x=d.applets[+b.dataset.remove];if(confirm('Remove '+x.title+' from the catalog? This does not uninstall it.')){await write('/api/applets/'+encodeURIComponent(x.name)+'?delete_package='+(x.source==='local'?1:0),{method:'DELETE'});applets()}});await catalogControls()}
 async function editApplet(x){app.innerHTML='<h2>Edit '+esc(x.title)+'</h2><section class="card"><form id="edit-form">'+fields(x)+(x.source==='external'?'<div class="form-row"><label>External URL</label><input name="url" value="'+esc(x.url)+'"></div><div class="form-row"><label>SHA-1</label><input name="sha" value="'+esc(x.sha)+'"></div>':'<input type="hidden" name="url" value="'+esc(x.url)+'"><input type="hidden" name="sha" value="'+esc(x.sha)+'">')+'<button>Save metadata</button> <button type="button" id="cancel">Cancel</button><div id="message"></div></form></section>';const f=document.querySelector('#edit-form');f.elements.name.readOnly=true;document.querySelector('#cancel').onclick=applets;f.onsubmit=async e=>{e.preventDefault();try{await write('/api/applets/'+encodeURIComponent(x.name),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(values(f))});applets()}catch(y){document.querySelector('#message').textContent=y.message}}}
 let radioConfig=null;
 const radioHeaders=()=>({'Content-Type':'application/json'});

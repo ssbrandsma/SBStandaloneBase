@@ -11,9 +11,11 @@ it must not contain SSH credentials, hosting paths or container settings.
 On first boot the packaged
 catalog is copied to `/mnt/storage/standalonebase/config.json`; `sbbase` reads
 that file and returns its entries for the Applet Installer `jiveapplets`
-request. Catalog updates must be supplied through the authenticated management
-interface or another explicitly configured distribution channel. Publishing
-the GitHub file does not by itself add an automatic GitHub fetch to the service.
+request. The new [catalog synchronizer](APPLET_CATALOG_SYNC.md) checks GitHub
+through sbproxy at startup and every six hours, merges newer applet releases
+without replacing local settings, and notifies sbbase to reload. Existing
+installations need the new webserver deployed before this automatic refresh
+is available; editing GitHub alone cannot update older code.
 
 Update the tracked `config.json` when releasing applets. A private alternative
 may remain under `.local/`; select it explicitly with PowerShell `-ConfigPath`
@@ -23,8 +25,9 @@ contains Standalone Base, Standalone Radio, Spotify Connect, and Qobuz Connect.
 After loading the refreshed catalog, the local Applet Installer can offer Base
 updates without switching the selected LMS back to the bootstrap server. The
 standard installer performs its normal reboot after installation. This catalog
-entry does not add a new self-update mechanism or automatically refresh an
-already installed Radio's persistent configuration.
+entry does not add a new self-install mechanism. On installations with catalog
+synchronization, the refreshed metadata is merged into persistent configuration
+automatically; the user still chooses whether to install an update.
 
 For a Base release, build and publish the ZIP first, then update the public
 Base entry to its final version, URL and SHA-1. Do not repack that same ZIP to

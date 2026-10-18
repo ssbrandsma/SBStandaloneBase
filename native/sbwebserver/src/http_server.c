@@ -13,6 +13,7 @@
 #include "applets.h"
 #include "settings.h"
 #include "repository.h"
+#include "catalog_sync.h"
 #include "remote.h"
 #include "radio_stations.h"
 #include "auth.h"
@@ -568,6 +569,20 @@ normal(Server *s, struct mg_connection *c, struct mg_http_message *m)
 			radio_handle(c, m);
 		return;
 	}
+	if (is(m->uri, "/api/catalog/status") && is(m->method, "GET")) {
+		catalog_sync_status(b, sizeof b);
+		reply(c, 200, b);
+		return;
+	}
+	if (is(m->uri, "/api/catalog/refresh") && is(m->method, "POST")) {
+		if (!writable(s, c, m))
+			return;
+		if (!catalog_sync_request())
+			error(c, 409, "Catalog refresh is already running");
+		else
+			reply(c, 202, "{\"ok\":true}");
+		return;
+	}
 	if (is(m->uri, "/api/applets") && is(m->method, "GET")) {
 		if (repo_list_json(b, sizeof b))
 			error(c, 500, "Cannot load catalog");
@@ -759,6 +774,7 @@ int http_server_run(int port, const char *root)
 	for (;;) {
 		mg_mgr_poll(&mgr, 100);
 		image_render_tick(&mgr);
+		catalog_sync_tick(&mgr);
 		remote_tick();
 	}
 }

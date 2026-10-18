@@ -48,6 +48,29 @@ endif()
 if(NOT WIN32)
   find_package(Python3 COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
+    find_package(Threads REQUIRED)
+    add_executable(test_catalog_merge repository/test_catalog_merge.c
+      ../native/sbwebserver/src/repository.c ../native/sbwebserver/third_party/mongoose.c)
+    target_include_directories(test_catalog_merge PRIVATE
+      ../native/sbwebserver/src ../native/sbwebserver/third_party)
+    target_compile_definitions(test_catalog_merge PRIVATE _GNU_SOURCE MG_ENABLE_EPOLL=0 MG_ENABLE_POLL=1)
+    target_link_libraries(test_catalog_merge PRIVATE Threads::Threads)
+    add_test(NAME catalog_merge COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/repository/test_catalog_merge.py $<TARGET_FILE:test_catalog_merge>)
+    get_target_property(CATALOG_WEB_SOURCES sbwebserver SOURCES)
+    set(CATALOG_TEST_SOURCES)
+    foreach(source IN LISTS CATALOG_WEB_SOURCES)
+      list(APPEND CATALOG_TEST_SOURCES "${CMAKE_SOURCE_DIR}/native/sbwebserver/${source}")
+    endforeach()
+    add_executable(sbwebserver_catalog_test ${CATALOG_TEST_SOURCES})
+    target_include_directories(sbwebserver_catalog_test PRIVATE
+      ../native/sbwebserver/src ../native/sbwebserver/third_party)
+    target_compile_definitions(sbwebserver_catalog_test PRIVATE _GNU_SOURCE SB_CATALOG_TESTING
+      MG_ENABLE_EPOLL=0 MG_ENABLE_POLL=1 MG_ENABLE_DIRLIST=0 MG_ENABLE_SSI=0)
+    target_link_libraries(sbwebserver_catalog_test PRIVATE Threads::Threads)
+    add_test(NAME catalog_sync COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/repository/test_catalog_sync.py $<TARGET_FILE:sbwebserver_catalog_test>
+      ${CMAKE_SOURCE_DIR}/native/sbwebserver/web)
     add_executable(test_public_address images/test_public_address.c)
     add_test(NAME image_public_address COMMAND test_public_address)
     add_test(NAME svg_renderer COMMAND ${Python3_EXECUTABLE}
@@ -92,5 +115,8 @@ if(NOT WIN32)
     add_test(NAME process_monitor COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/monitor/test_monitor_http.py $<TARGET_FILE:sbwebserver> ${CMAKE_SOURCE_DIR}/native/sbwebserver/web)
     add_test(NAME cpu_accounting_diagnostic COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/monitor/test_cpu_diagnostic.py)
+    set_tests_properties(applet_repository svg_image_http remote_http
+      radio_management_http web_access_pairing system_log_viewer process_monitor
+      PROPERTIES ENVIRONMENT "SB_CATALOG_SYNC_DISABLED=1")
   endif()
 endif()

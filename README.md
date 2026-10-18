@@ -60,6 +60,10 @@ Deployment endpoints, account names, filesystem paths and container names are
 private local configuration. Copy `packaging/deployment.env.example` to
 `.local/deployment.env`, populate it locally, and never commit that file.
 
+The public root `config.json` includes Base and the other applet releases.
+See [catalog synchronization](docs/APPLET_CATALOG_SYNC.md) for automatic GitHub
+refresh, local merge rules, and the Applets page's manual update check.
+
 ## Artwork routing
 
 See [local artwork routing](docs/ARTWORK_ROUTING.md) for the HTTP/HTTPS loopback

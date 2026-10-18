@@ -12,8 +12,8 @@ test -r "$config" || {
 : "${BASE_ROOT:?}" "${MERGED_XML:?}" "${BOOTSTRAP_CONFIG:?}"
 : "${WEB_OWNER:?}" "${BOOTSTRAP_OWNER:?}" "${CONTAINER_NAME:?}"
 
-version=${SB_RELEASE_VERSION:-0.4.4}
-expected_sha=${SB_RELEASE_SHA1:-c481883670f928d28a1387c469f5cb5013f9faa5}
+version=${SB_RELEASE_VERSION:-0.5.0}
+expected_sha=${SB_RELEASE_SHA1:-97e46a0bdd4dd0ac67ca673a592a75c9daf453ef}
 release_dir=${SB_RELEASE_STAGE:-/tmp}
 stamp=$(date +%Y%m%d-%H%M%S)
 base_root=$BASE_ROOT
