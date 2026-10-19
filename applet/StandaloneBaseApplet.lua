@@ -213,7 +213,7 @@ function menu(self)
     for _,s in ipairs(SERVICES) do menu:addItem({text=s.name..": "..(alive(s) and "Running" or "Stopped")}) end
     menu:addItem({text="Extended Storage",callback=function() self:storageMenu() end})
     menu:addItem({text="Web Access",callback=function() if not self.remoteBridge:isInjecting() then self:webAccessMenu() end end})
-	menu:addItem({text="Version: 0.5.2"})
+	menu:addItem({text="Version: 0.5.3"})
     window:addWidget(menu); window:show()
 end
 function webAccessMenu(self)
