@@ -1,4 +1,7 @@
 local root = arg[1]
+package.preload["jive.utils.log"] = function()
+    return {logger=function() return {warn=function() end} end}
+end
 package.preload["applets.StandaloneBase.ImageRender"] = function()
     return dofile(root .. "/applet/ImageRender.lua")
 end
@@ -7,8 +10,9 @@ for _, scheme in ipairs({"http", "https"}) do
     for _, format in ipairs({"png", "jpg", "jpeg"}) do
         local source = scheme .. "://example.com/logo." .. format .. "?x=a%2Fb&token=q@r"
         local result = artwork.route(source, 320, 240)
-        assert(result:find("http://127.0.0.1:8765/artwork/320/240/", 1, true) == 1)
-        assert(result:find("/" .. scheme .. "/example.com/logo." .. format .. "?x=a%2Fb&token=q@r", 1, true))
+        assert(result:find("http://127.0.0.1:80/api/image/render?", 1, true) == 1)
+        assert(result:find("width=320&height=240", 1, true))
+        assert(result:find("%252F", 1, true)) -- source escapes survive query encoding
         assert(artwork.route(result) == result)
     end
     assert(artwork.route(scheme .. "://example.com/logo.svg?q=1", 64, 32):find("/api/image/render?", 1, true))
@@ -20,7 +24,7 @@ for _, url in ipairs({"abc123", "/music/foo/cover.png", "plugins/icon.png",
 end
 assert(artwork.route("http://127.0.0.1:8765/https/example.com/art.jpg") ==
     artwork.route("https://example.com/art.jpg"))
-assert(artwork.route("http://example.com?q=a%2Fb"):find("/http/example.com/?q=a%2Fb", 1, true))
+assert(artwork.route("http://example.com?q=a%2Fb"):find("/api/image/render?", 1, true))
 
 local function state()
     local cache, wakes = {}, 0

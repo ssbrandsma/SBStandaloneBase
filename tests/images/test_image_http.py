@@ -17,6 +17,7 @@ import urllib.parse
 import urllib.request
 
 from test_renderer import decode
+from test_raster import png as raster_png
 
 SVG = b'<svg viewBox="0 0 100 50"><rect width="100" height="50" fill="red"/></svg>'
 
@@ -26,13 +27,35 @@ class Source(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         Source.count += 1
+        if self.path.startswith('/raster'):
+            data = raster_png(640, 480, lambda y: bytes([240, 20, 30, 255]) * 640)
+            if self.path == '/raster-large':
+                # Poorly compressing input above the former 1 MiB limit.
+                import random
+                generator = random.Random(42)
+                data = raster_png(640, 480, lambda y: generator.randbytes(640 * 4))
+            self.send_response(200)
+            if self.path == '/raster-chunked':
+                self.send_header('Transfer-Encoding', 'chunked')
+            elif self.path != '/raster-close':
+                self.send_header('Content-Length', str(len(data) + (10 if self.path == '/raster-truncated' else 0)))
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            if self.path == '/raster-chunked':
+                for offset in range(0, len(data), 73):
+                    part = data[offset:offset+73]
+                    self.wfile.write(f'{len(part):x};test=1\r\n'.encode() + part + b'\r\n')
+                self.wfile.write(b'0\r\n\r\n')
+            else:
+                self.wfile.write(data)
+            return
         if self.path.startswith('/slow'):
             time.sleep(0.5)
         if self.path == '/timeout':
-            time.sleep(9)
+            time.sleep(13)
         if self.path == '/oversize':
             self.send_response(200)
-            self.send_header('Content-Length', str(2 * 1024 * 1024))
+            self.send_header('Content-Length', str(9 * 1024 * 1024))
             self.end_headers()
             return
         redirects = {'/redirect': '/logo', '/unsafe': 'http://127.0.0.1/private',
@@ -133,6 +156,10 @@ def main():
                     assert request(image(url))[0] == 400, url
                 assert request(image(), method='DELETE')[0] == 405
                 if network:
+                    for path in ['/raster', '/raster-chunked', '/raster-close', '/raster-large']:
+                        status, png, _ = request(image('http://image.test' + path))
+                        assert status == 200 and decode(png)[:2] == (320, 240), (path, status, png)
+                    assert request(image('http://image.test/raster-truncated'))[0] == 502
                     before = Source.count
                     assert request(image('https://image.test/logo'))[0] == 503
                     assert Source.count == before + 1  # Only /health; no unsafe fallback against an old proxy.

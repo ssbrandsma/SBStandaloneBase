@@ -2,6 +2,7 @@
 -- only SVG uses ImageRender's existing bounded native conversion/cache.
 local ImageRender = require("applets.StandaloneBase.ImageRender")
 local M = {}
+local log = require("jive.utils.log").logger("StandaloneBase")
 
 local function localHost(host)
     if host == "localhost" or host:match("%.local$") or host:match("%.lan$") or
@@ -33,7 +34,7 @@ function M.route(url, width, height)
     width, height = tonumber(width) or 320, tonumber(height) or 320
     width = math.max(16, math.min(512, math.floor(width)))
     height = math.max(16, math.min(512, math.floor(height)))
-    local converted = ImageRender.artworkUrl(url, width, height)
+    local converted = ImageRender.artworkUrl(url, width, height, "image/*")
     if converted ~= url then return converted end
     -- Dimensions and web port let the proxy redirect MIME-identified SVG to
     -- the existing local renderer, without receiving SVG bytes in Lua.
@@ -62,6 +63,8 @@ function M.sink(self, key, size, url, decode)
             if image then
                 self.artworkCache:set(key, chunk)
             else
+                log:warn("StandaloneBase: artwork failed bytes=", tostring(type(chunk) == "string" and #chunk or 0),
+                    " reason=", tostring(err or "image decode failed"))
                 self.artworkCache:set(key, nil)
                 self.imageCache[key] = nil
             end

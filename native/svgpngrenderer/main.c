@@ -17,6 +17,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include "raster.h"
 
 #define NANOSVG_IMPLEMENTATION
 #define NANOSVG_ALL_COLOR_KEYWORDS
@@ -220,7 +221,7 @@ int main(int argc, char **argv)
 	int width = 320, height = 320, fd = -1, png_size = 0, result = 0;
 	struct stat st;
 	struct rlimit memory = {32u * 1024u * 1024u, 32u * 1024u * 1024u};
-	struct rlimit cpu = {5, 5}, core = {0, 0};
+	struct rlimit cpu = {5, 10}, core = {0, 0};
 	struct timespec begin, end;
 	struct rusage usage;
 	clock_gettime(CLOCK_MONOTONIC, &begin);
@@ -248,6 +249,24 @@ int main(int argc, char **argv)
 		if (fd >= 0)
 			close(fd);
 		return fail(66, "input is not a readable regular file");
+	}
+	unsigned char signature[8];
+	ssize_t signature_size = pread(fd, signature, sizeof signature, 0);
+	if (signature_size == 8 &&
+	    (!memcmp(signature, "\211PNG\r\n\032\n", 8) ||
+	     (signature[0] == 255 && signature[1] == 216))) {
+		/* Large scanline-decoded rasters need more CPU on ARM926 than a
+		 * small SVG. Keep a hard bound within the service's 20s deadline. */
+		cpu.rlim_cur = 10;
+		if (setrlimit(RLIMIT_CPU, &cpu)) {
+			close(fd);
+			return fail(75, "cannot enforce raster CPU limit");
+		}
+		if (st.st_size > 8u * 1024u * 1024u) {
+			close(fd);
+			return fail(65, "raster input exceeds 8 MiB");
+		}
+		return raster_render(fd, output, (unsigned)width, (unsigned)height);
 	}
 	if (st.st_size <= 0 || st.st_size > INPUT_LIMIT) {
 		close(fd);

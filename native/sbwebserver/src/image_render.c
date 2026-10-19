@@ -29,6 +29,7 @@
 #include <unistd.h>
 
 #define SVG_LIMIT (1024u * 1024u)
+#define IMAGE_LIMIT (8u * 1024u * 1024u)
 #define PNG_LIMIT (2u * 1024u * 1024u)
 #define URL_LIMIT 4096
 #define CACHE_LIMIT (20u * 1024u * 1024u)
@@ -55,6 +56,7 @@ static struct {
 	unsigned char *data;
 	size_t received;
 	uint64_t deadline;
+	size_t input_limit;
 } job;
 
 /** Compare an HTTP token without reading beyond its bounded Mongoose string. */
@@ -72,7 +74,7 @@ static size_t header_size(struct mg_str value)
 		return (size_t)-1;
 	for (size_t i = 0; i < value.len; i++) {
 		if (value.buf[i] < '0' || value.buf[i] > '9' ||
-		    result > SVG_LIMIT)
+		    result > IMAGE_LIMIT)
 			return (size_t)-1;
 		result = result * 10 + (size_t)(value.buf[i] - '0');
 	}
@@ -88,8 +90,8 @@ static void image_error(struct mg_connection *c, unsigned code)
 		: code == 401 ? "Browser pairing required"
 		: code == 403 ? "Image access or destination rejected"
 		: code == 405 ? "Method not allowed"
-		: code == 413 ? "SVG exceeds 1 MiB"
-		: code == 415 ? "Malformed or unsupported SVG"
+		: code == 413 ? "Image exceeds input limit"
+		: code == 415 ? "Malformed or unsupported image"
 		: code == 503 ? "Image resource limit or renderer unavailable"
 		: code == 504 ? "Image operation timed out"
 			      : "Image download failed";
@@ -195,13 +197,75 @@ typedef struct {
 	unsigned status;
 	int done, capability;
 	char location[URL_LIMIT];
+	FILE *stream;
+	size_t remaining, chunk_remaining;
+	int detached, chunked, chunk_end;
+	size_t limit;
 } Fetch;
+
+/* Consume an HTTP entity into the private job file, keeping only a network
+ * window in memory. Supports length, chunked and connection-close framing. */
+static void stream_body(struct mg_connection *c, Fetch *f)
+{
+	while (c->recv.len && !f->done) {
+		if (f->chunked && !f->chunk_remaining) {
+			if (f->chunk_end) {
+				if (c->recv.len < 2) return;
+				if (memcmp(c->recv.buf, "\r\n", 2)) goto invalid;
+				mg_iobuf_del(&c->recv, 0, 2);
+				f->chunk_end = 0;
+			}
+			size_t i = 0, value = 0, digits = 0;
+			while (i + 1 < c->recv.len && !(c->recv.buf[i] == '\r' && c->recv.buf[i+1] == '\n')) i++;
+			if (i + 1 >= c->recv.len) { if (c->recv.len > 128) goto invalid; return; }
+			if (i > 128) goto invalid;
+			for (size_t j = 0; j < i && c->recv.buf[j] != ';'; j++) {
+				unsigned char ch = c->recv.buf[j];
+				unsigned d = ch >= '0' && ch <= '9' ? ch-'0' : ch >= 'a' && ch <= 'f' ? ch-'a'+10 : ch >= 'A' && ch <= 'F' ? ch-'A'+10 : 16;
+				if (d > 15 || value > f->limit/16) goto invalid;
+				value = value * 16 + d; digits++;
+			}
+			if (!digits) goto invalid;
+			mg_iobuf_del(&c->recv, 0, i+2);
+			if (!value) { f->done=1; c->is_closing=1; return; }
+			if (value > f->limit-f->size) goto too_large;
+			f->chunk_remaining=value;
+		}
+		size_t count=c->recv.len;
+		if (f->chunked && count > f->chunk_remaining) count=f->chunk_remaining;
+		if (!f->chunked && count > f->remaining) count=f->remaining;
+		if (count > f->limit-f->size) goto too_large;
+		if (count && fwrite(c->recv.buf,1,count,f->stream) != count) { f->status=503; goto stop; }
+		f->size += count;
+		mg_iobuf_del(&c->recv,0,count);
+		if (f->chunked) { f->chunk_remaining-=count; if (!f->chunk_remaining) f->chunk_end=1; }
+		else if (f->remaining != (size_t)-1) {
+			f->remaining-=count;
+			if (!f->remaining) { f->done=1; c->is_closing=1; return; }
+		}
+	}
+	return;
+too_large:
+	f->status=413; goto stop;
+invalid:
+	f->status=502;
+stop:
+	f->done=1; c->is_closing=1;
+}
 
 /** Receive bounded HTTP data with the existing Mongoose client implementation.
  */
 static void fetch_event(struct mg_connection *c, int event, void *data)
 {
 	Fetch *f = c->fn_data;
+	if (f->detached) {
+		if (event == MG_EV_READ && !f->done) stream_body(c,f);
+		if ((event == MG_EV_ERROR || event == MG_EV_CLOSE) && !f->done) {
+			if (event == MG_EV_ERROR || f->chunked || f->remaining != (size_t)-1) f->status=502;
+			f->done=1;
+		}
+		return;
+	}
 	if (event == MG_EV_READ && c->recv.len > SVG_LIMIT + 16384u) {
 		f->status = 413;
 		f->done = 1;
@@ -209,10 +273,21 @@ static void fetch_event(struct mg_connection *c, int event, void *data)
 	} else if (event == MG_EV_HTTP_HDRS) {
 		struct mg_http_message *m = data;
 		struct mg_str *length = mg_http_get_header(m, "Content-Length");
-		if (length && header_size(*length) > SVG_LIMIT) {
+		if (length && header_size(*length) > (f->stream ? f->limit : SVG_LIMIT)) {
 			f->status = 413;
 			f->done = 1;
 			c->is_closing = 1;
+		}
+		if (f->stream && !f->done && mg_http_status(m)==200) {
+			struct mg_str *encoding=mg_http_get_header(m,"Transfer-Encoding");
+			if (encoding && !equal(*encoding,"chunked")) { f->status=502; f->done=1; c->is_closing=1; return; }
+			f->status=200;
+			f->remaining=length ? header_size(*length) : (size_t)-1;
+			f->chunked=encoding != NULL;
+			f->detached=1;
+			mg_iobuf_del(&c->recv,0,(size_t)(m->body.buf-m->message.buf));
+			stream_body(c,f);
+			if (!f->chunked && !f->remaining) { f->done=1; c->is_closing=1; }
 		}
 	} else if (event == MG_EV_HTTP_MSG && !f->done) {
 		struct mg_http_message *m = data;
@@ -254,10 +329,17 @@ static Fetch fetch_once(const char *address,
 			const char *host,
 			const char *path,
 			int public_only,
-			uint64_t deadline)
+			uint64_t deadline, const char *file)
 {
 	struct mg_mgr mgr;
 	Fetch f = {0};
+	if (file) {
+		f.limit=job.input_limit;
+		int fd=open(file,O_WRONLY|O_CREAT|O_TRUNC|O_NOFOLLOW,0600);
+		if (fd < 0) { f.status=503; return f; }
+		f.stream=fdopen(fd,"wb");
+		if (!f.stream) { close(fd); f.status=503; return f; }
+	}
 	mg_mgr_init(&mgr);
 	struct mg_connection *c =
 		mg_http_connect(&mgr, address, fetch_event, &f);
@@ -268,7 +350,7 @@ static Fetch fetch_once(const char *address,
 		mg_printf(
 			c,
 			"GET %s HTTP/1.1\r\nHost: %s\r\nAccept: "
-			"image/svg+xml\r\n"
+			"image/png,image/jpeg,image/svg+xml\r\n"
 			"User-Agent: StandaloneBaseSVG/1.0 "
 			"(+https://github.com/ssbrandsma/SBStandaloneBase)\r\n"
 			"Accept-Encoding: identity\r\n%sConnection: "
@@ -283,12 +365,14 @@ static Fetch fetch_once(const char *address,
 		f.done = 1;
 	}
 	mg_mgr_free(&mgr);
+	if (f.stream && fclose(f.stream)) f.status=503;
+	f.stream=NULL;
 	return f;
 }
 
 /** Download with per-hop validation and a single overall eight-second deadline.
  */
-static Fetch download(ImageUrl u)
+static Fetch download(ImageUrl u, const char *file)
 {
 	uint64_t deadline = mg_millis() + 8000;
 	Fetch f = {0};
@@ -305,7 +389,7 @@ static Fetch download(ImageUrl u)
 			/* Require the opt-in SSRF guard before sending a source
 			 * URL. */
 			f = fetch_once(
-				proxy, "127.0.0.1", "/health", 0, deadline);
+				proxy, "127.0.0.1", "/health", 0, deadline, NULL);
 			free(f.body);
 			f.body = NULL;
 			if (f.status != 200 || !f.capability) {
@@ -321,7 +405,7 @@ static Fetch download(ImageUrl u)
 				return f;
 			}
 			return fetch_once(
-				proxy, "127.0.0.1", path, 1, deadline);
+				proxy, "127.0.0.1", path, 1, deadline, file);
 		}
 		unsigned port = 80;
 #ifdef SB_IMAGE_TESTING
@@ -330,7 +414,7 @@ static Fetch download(ImageUrl u)
 			port = (unsigned)atoi(getenv("SB_IMAGE_TEST_PORT"));
 #endif
 		snprintf(address, sizeof address, "http://%s:%u", ip, port);
-		f = fetch_once(address, u.host, u.path, 0, deadline);
+		f = fetch_once(address, u.host, u.path, 0, deadline, file);
 		if (f.status < 300 || f.status >= 400)
 			return f;
 		if (hop == 3 || !f.location[0]) {
@@ -616,13 +700,14 @@ static void worker(int pipe_fd,
 		}
 	}
 	fprintf(stderr,
-		"[svg-image] cache miss; %s input %dx%d\n",
+		"[image] cache miss; %s host=%s requested=%dx%d input_limit=%u\n",
 		body ? "local" : "remote",
+		body ? "upload" : source->host,
 		width,
-		height);
+		height, IMAGE_LIMIT);
 	if (!body) {
 		fprintf(stderr, "[svg-image] download start\n");
-		fetched = download(*source);
+		fetched = download(*source, input);
 		if (fetched.status != 200 || !fetched.size) {
 			result.status = fetched.status == 403 ||
 							fetched.status == 413 ||
@@ -632,21 +717,22 @@ static void worker(int pipe_fd,
 						: 502;
 			goto send;
 		}
-		body = fetched.body;
 		body_size = fetched.size;
 		fprintf(stderr,
 			"[svg-image] download complete %zu bytes\n",
 			body_size);
 	}
-	int fd = open(input, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-	if (fd < 0) {
-		result.status = 503;
-		goto send;
-	}
-	int ok = write_all(fd, body, body_size);
-	if (close(fd) || !ok) {
-		result.status = 503;
-		goto send;
+	if (body) {
+		int fd = open(input, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+		if (fd < 0) {
+			result.status = 503;
+			goto send;
+		}
+		int ok = write_all(fd, body, body_size);
+		if (close(fd) || !ok) {
+			result.status = 503;
+			goto send;
+		}
 	}
 	result.status = convert_file(input, output, width, height);
 	if (result.status != 200)
@@ -662,7 +748,7 @@ send:
 	result.size = png ? (unsigned)png_size : 0;
 	if (write_all(pipe_fd, &result, sizeof result) && png)
 		write_all(pipe_fd, png, png_size);
-	if (getenv("SB_IMAGE_DIAGNOSTICS"))
+	if (result.status != 200 || getenv("SB_IMAGE_DIAGNOSTICS"))
 		fprintf(stderr,
 			"[svg-image] result=%u cache=%u bytes=%u\n",
 			result.status,
@@ -772,7 +858,7 @@ int image_render_handle(struct mg_connection *c, struct mg_http_message *m)
 	}
 	mg_sha256_ctx hash;
 	mg_sha256_init(&hash);
-	const char *version = "svgpng-v1:meet-transparent:";
+	const char *version = "image-v2:area-fit-no-upscale:";
 	mg_sha256_update(
 		&hash, (const unsigned char *)version, strlen(version));
 	mg_sha256_update(&hash,
@@ -804,7 +890,16 @@ int image_render_handle(struct mg_connection *c, struct mg_http_message *m)
 			image_error(c, 503);
 			return 1;
 		}
+		/* Large compressed originals must not occupy the Radio's ramfs.
+		 * Use the existing verified extended-storage cache for private jobs. */
+		char scratch[128];
+		job.input_limit=512u*1024u;
 		strcpy(job.directory, "/tmp/sb-svg.XXXXXX");
+		if (cache_directory(scratch,sizeof scratch) &&
+		    strlen(scratch)+sizeof "/job.XXXXXX" < sizeof job.directory) {
+			snprintf(job.directory,sizeof job.directory,"%s/job.XXXXXX",scratch);
+			job.input_limit=IMAGE_LIMIT;
+		}
 		if (!mkdtemp(job.directory)) {
 			free(job.data);
 			job.data = NULL;

@@ -28,13 +28,13 @@
     {
       "name": "StandaloneRadio",
       "title": "Standalone Radio",
-      "version": "0.9.7",
+      "version": "0.9.8",
       "target": "baby",
       "min_target_version": "7.7",
-      "url": "http://49.12.198.91/sbstandalone/StandaloneRadio-0.9.7.zip",
-      "sha": "3339e20345ff83ccc495f390b7978e5f0a7c477c",
+      "url": "http://49.12.198.91/sbstandalone/StandaloneRadio-0.9.8.zip",
+      "sha": "8e3f27cb0eecf4cd5ceadbda96259f4ccf5d04ff",
       "desc": "Standalone internet radio playback for Logitech Squeezebox Radio.",
-      "changes": "Improve RadioFeeds and HLS playback, metadata and artwork; release playback control when connecting to an external LMS.",
+      "changes": "Improve RadioFeeds and HLS playback, metadata and artwork integration; restore playback control when switching LMS servers.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     },

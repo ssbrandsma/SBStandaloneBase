@@ -1,3 +1,5 @@
-add_executable(svgpngrenderer main.c)
+find_package(PNG REQUIRED)
+find_package(JPEG REQUIRED)
+add_executable(svgpngrenderer main.c raster.c)
 target_include_directories(svgpngrenderer PRIVATE third_party)
-target_link_libraries(svgpngrenderer PRIVATE m)
+target_link_libraries(svgpngrenderer PRIVATE m PNG::PNG JPEG::JPEG)

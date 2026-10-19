@@ -85,6 +85,8 @@ if(NOT WIN32)
     add_test(NAME image_public_address COMMAND test_public_address)
     add_test(NAME svg_renderer COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/images/test_renderer.py $<TARGET_FILE:svgpngrenderer>)
+    add_test(NAME raster_renderer COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/images/test_raster.py $<TARGET_FILE:svgpngrenderer>)
     add_test(NAME svg_image_http COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/images/test_image_http.py $<TARGET_FILE:sbwebserver>
       $<TARGET_FILE:svgpngrenderer> ${CMAKE_SOURCE_DIR}/native/sbwebserver/web)

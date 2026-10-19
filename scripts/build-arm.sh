@@ -47,8 +47,12 @@ mkdir -p "$out"
 "$cc" -static $flags -std=c99 -Wall -Wextra -Wpedantic -Wl,--gc-sections \
   "$root/native/sbstorage/sb_storage_updater.c" -o "$out/sb-storage-updater"
 
+image_prefix="${ARM_IMAGE_PREFIX:-$root/build-image-arm/prefix}"
+test -f "$image_prefix/lib/libpng16.a" || { echo "Run scripts/build-image-libs.sh first" >&2; exit 1; }
 "$cc" -static $flags -std=c99 -Wall -Wextra -Wl,--gc-sections \
-  -I"$root/native/svgpngrenderer/third_party" "$root/native/svgpngrenderer/main.c" \
+  -I"$root/native/svgpngrenderer/third_party" -I"$image_prefix/include" \
+  "$root/native/svgpngrenderer/main.c" "$root/native/svgpngrenderer/raster.c" \
+  "$image_prefix/lib/libpng16.a" "$image_prefix/lib/libjpeg.a" "$image_prefix/lib/libz.a" \
   -lm -o "$out/svgpngrenderer"
 
 "$strip" --strip-all "$out/sbbase" "$out/sbwebserver" "$out/sbproxy" "$out/sb-storage-helper" "$out/sb-storage-updater" "$out/svgpngrenderer"
