@@ -55,6 +55,7 @@ class RecoveryTests(unittest.TestCase):
                           (BOOT, 'storage-boot.sh')]:
             shutil.copy2(src, self.source / 'StandaloneBase' / name)
         scripts = {
+            'logger': 'cat >>"$SB_STORAGE_ROOT/tmp/syslog.messages"',
             'insmod': 'test "${FAIL_MODULE:-0}" = 0 || exit 1\necho "nodev sbubifs" >>"$SB_STORAGE_ROOT/proc/filesystems"',
             'mount': 'echo "$*" >>"$SB_STORAGE_ROOT/tmp/mount.calls"\n'
                      'test "${FAIL_MOUNT:-0}" = 0 || exit 1\n'
@@ -84,6 +85,11 @@ class RecoveryTests(unittest.TestCase):
         self.assertFalse((self.root / 'tmp/mount.calls').exists(), 'check must be read-only')
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        logs = (self.root / 'tmp/syslog.messages').read_text()
+        self.assertIn('COPY_CUSTOM_APPLET name=CustomPlugin', logs)
+        self.assertIn('RECOVERY_SPACE required_kb=', logs)
+        self.assertIn('COPY_FIRMWARE_APPLETS', logs)
+        self.assertIn('OPERATION_COMPLETE EXIT_CODE=0 REBOOT_REQUIRED=1', logs)
         self.assertIn('STATUS=REBOOT_REQUIRED', result.stdout)
         self.assertEqual((self.old / 'SetupAppletInstaller/core.lua').read_text(), 'new firmware')
         self.assertFalse((self.old / 'Spotify').exists())
@@ -152,6 +158,9 @@ class RecoveryTests(unittest.TestCase):
 
     def test_full_volume_and_failed_copy_preserve_original(self):
         self.assertEqual(self.run_script(FREE_KB='1').returncode, 26)
+        logs = (self.root / 'tmp/syslog.messages').read_text()
+        self.assertIn('available_kb=1', logs)
+        self.assertIn('ERROR=recovery_insufficient_space EXIT_CODE=26', logs)
         self.assertEqual((self.old / 'SetupAppletInstaller/core.lua').read_text(), 'old firmware')
         # Reset the mock mount record before the independent retry.
         self.write('proc/mounts', f'ubi0:ubifs {self.root}/mnt/storage ubifs rw 0 0\n')

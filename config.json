@@ -1,6 +1,6 @@
 {
   "catalog_version": "1",
-  "standalone_base_version": "0.5.5",
+  "standalone_base_version": "0.5.6",
   "server": {
     "name": "Standalone Base",
     "uuid": "9d989f40-499a-4b85-b92f-8dc415af2a04",
@@ -15,13 +15,13 @@
     {
       "name": "StandaloneBase",
       "title": "Standalone Base",
-      "version": "0.5.5",
+      "version": "0.5.6",
       "target": "baby",
       "min_target_version": "7.7.2",
-      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.5.5.zip",
-      "sha": "ab1e8cef14d61f156fc642f587de43e4312b9d97",
+      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.5.6.zip",
+      "sha": "6ecaf351d9460bd4b8623351b524bf24b66ce03c",
       "desc": "Local LMS-compatible infrastructure services for Squeezebox Radio.",
-      "changes": "Restore catalog refresh on older kernels, add physically confirmed storage reinitialization, and provide detailed read-only Extended Storage analysis.",
+      "changes": "Log Extended Storage checks, analysis, erase, initialization, applet copying and recovery progress to the system log for easy export.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     },

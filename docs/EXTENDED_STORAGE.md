@@ -76,9 +76,9 @@ module and boot hook is reported as `AVAILABLE`, not as an unexplained error.
 
 ### Diagnosing an unsupported layout
 
-When status is neither active nor reboot-pending, `check` automatically saves a
-bounded diagnostic snapshot to **`/tmp/sbstorage-check.log`** (RAM only, mode
-0600). Repeated checks with unchanged status output reuse the snapshot instead
+`check` automatically saves a bounded diagnostic snapshot to
+**`/tmp/sbstorage-check.log`** (RAM only, mode 0600), also for active or
+reboot-pending storage. Repeated checks with unchanged status output reuse the snapshot instead
 of repeatedly collecting the full inventory. This file is separate from
 `/tmp/sbstorage.log`, which records initialization and recovery operations.
 Opening the Radio's Extended Storage menu invokes the check; its failure
@@ -107,6 +107,38 @@ diagnostic only: no module loading, mounts, recovery, UBI updates or formatting.
 There is no persistent log history and no new NAND writes. Collect the report
 before restarting because `/tmp` is cleared at reboot. For an operation that
 actually failed, collect `/tmp/sbstorage.log` and `/tmp/sbstorage.status` too.
+
+### System Log export (0.5.6 and later)
+
+Storage diagnostics and operation output are also sent to the existing syslog
+daemon with tag **`standalonebase-storage`**. On the Radio these appear in
+`/var/log/messages` and the web interface's System Log viewer. Users can export
+that viewer's collected log or extract storage messages over SSH:
+
+```sh
+grep 'standalonebase-storage' /var/log/messages
+```
+
+A first status check or changed status logs the full report, including failed
+comparisons. Unchanged polling is deduplicated; changing used/free capacity
+alone does not trigger another report. `analyze` forces a fresh report to both
+the terminal and system log. Report lines include the operation and PID and
+are delimited by `CHECK_REPORT_BEGIN` / `CHECK_REPORT_END`. The existing status
+output remains parseable by Lua and the native service.
+
+Initialization, explicit erase/reinitialization and recovery log stages,
+filesystem image writing, command stdout/stderr, applet copying, verification
+counts, boot-hook installation, required/available recovery space, completion,
+errors and exit codes. Boot activation logs its checks, module loading, mount
+and bind steps too. Successful operations request a restart; logging never
+requests formatting, changes the safety gates or hides a failed command.
+
+The original `/tmp` reports are retained. No new daemon, persistent log file or
+flash history is introduced: delivery/retention follow the Radio's existing
+syslog configuration and rotation. Missing or failing syslog delivery does not
+prevent diagnostics or mask storage failures. Export promptly after reproducing
+the issue because the bounded system log can rotate. No pairing credentials or
+configuration contents are logged.
 
 The initialization interface is:
 

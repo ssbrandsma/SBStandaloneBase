@@ -61,7 +61,7 @@ static curl_socket_t public_image_socket(void *data,
 	return socket(address->family, address->socktype, address->protocol);
 }
 
-#define VERSION "0.5.5"
+#define VERSION "0.5.6"
 
 #define MAX_REQUEST 16384
 #define MAX_HEADERS 32768

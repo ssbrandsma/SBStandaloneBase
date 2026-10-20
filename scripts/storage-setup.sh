@@ -28,6 +28,43 @@ STATUS_FILE=$ROOT/tmp/sbstorage.status
 LOG_FILE=$ROOT/tmp/sbstorage.log
 CHECK_LOG=$ROOT/tmp/sbstorage-check.log
 REBOOT_MARKER=$PERSIST_DIR/extended-storage-reboot-required
+OPERATION=${1:-unknown}
+
+# Use the existing syslog daemon (normally /var/log/messages on the Radio).
+# Fixtures may provide their own logger; never send test messages to host syslog.
+system_logger() {
+    if test -n "$ROOT"; then
+        test -x "$ROOT/bin/logger" || return 0
+        "$ROOT/bin/logger" -t standalonebase-storage
+    elif command -v logger >/dev/null 2>&1; then
+        logger -t standalonebase-storage
+    fi
+}
+
+system_log() {
+    printf 'operation=%s pid=%s %s\n' "$OPERATION" "$$" "$*" | system_logger 2>/dev/null || true
+}
+
+system_log_file() {
+    sed "s/^/operation=$OPERATION pid=$$ /" "$1" | system_logger 2>/dev/null || true
+}
+
+operation_log() {
+    printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo unknown-time)" "$*" >>"$LOG_FILE"
+    system_log "$*"
+}
+
+# Preserve the command's exit code while mirroring its output to both logs.
+# No pipeline is used to execute the command, so logger cannot hide a failure.
+log_command() (
+    command_output=$(mktemp "$ROOT/tmp/sbstorage-command.XXXXXX") || exit 27
+    trap 'rm -f "$command_output"' EXIT
+    "$@" >"$command_output" 2>&1
+    command_status=$?
+    cat "$command_output" >>"$LOG_FILE"
+    system_log_file "$command_output"
+    exit "$command_status"
+)
 
 say() { printf '%s\n' "$*"; }
 value() { test -r "$1" && sed -n '1p' "$1" 2>/dev/null || true; }
@@ -259,7 +296,9 @@ layout_diagnostics() (
 write_check_report() (
     # One bounded snapshot, never an append-only polling log. Unchanged failed
     # checks skip the expensive inventory. Do not overwrite operation logs.
-    diagnostic_signature=$(printf '%s\n' "$1" | cksum 2>/dev/null) || diagnostic_signature=
+    diagnostic_stable=$(printf '%s\n' "$1" | sed '/^TOTAL_KB=/d; /^USED_KB=/d; /^FREE_KB=/d')
+    diagnostic_signature=$(printf '%s\n' "$diagnostic_stable" | cksum 2>/dev/null) \
+        || diagnostic_signature=$(printf '%s\n' "$diagnostic_stable" | tr '\n' '|')
     if test -n "$diagnostic_signature" && test "${2:-}" != analyze \
         && test "$(value "$CHECK_LOG")" = "SNAPSHOT=$diagnostic_signature"; then exit 0; fi
     umask 077
@@ -279,15 +318,19 @@ write_check_report() (
             fi
         fi
     } >"$diagnostic_tmp" 2>&1
-    mv "$diagnostic_tmp" "$CHECK_LOG"
+    mv "$diagnostic_tmp" "$CHECK_LOG" || exit 1
+    system_log 'CHECK_REPORT_BEGIN'
+    system_log_file "$CHECK_LOG"
+    system_log 'CHECK_REPORT_END'
 )
 
 check_storage() {
     diagnostic_snapshot=$(status_snapshot)
     printf '%s\n' "$diagnostic_snapshot"
-    if test "${1:-}" = analyze || ! printf '%s\n' "$diagnostic_snapshot" | grep -Eq '^STATUS=(ACTIVE|REBOOT_REQUIRED)$'; then
-        write_check_report "$diagnostic_snapshot" "${1:-}" || printf 'Storage diagnostic report could not be saved\n' >&2
-    fi
+    write_check_report "$diagnostic_snapshot" "${1:-}" || {
+        printf 'Storage diagnostic report could not be saved\n' >&2
+        system_log 'ERROR=diagnostic_report_write_failed'
+    }
     printf 'DIAGNOSTIC_LOG=/tmp/sbstorage-check.log\n'
     if test "${1:-}" = analyze; then cat "$CHECK_LOG"; fi
 }
@@ -380,23 +423,32 @@ status_snapshot() {
 stage() {
     STAGE=$1
     printf 'STAGE=%s\n' "$STAGE" >"$STATUS_FILE"
-    printf '%s STAGE=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo unknown-time)" "$STAGE" >>"$LOG_FILE"
+    operation_log "STAGE=$STAGE"
 }
 
 die() {
     code=$1; shift
     printf 'ERROR=%s\nEXIT_CODE=%s\n' "$*" "$code" >>"$STATUS_FILE"
-    printf '%s ERROR=%s EXIT_CODE=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo unknown-time)" "$*" "$code" >>"$LOG_FILE"
+    operation_log "ERROR=$* EXIT_CODE=$code"
     exit "$code"
 }
 
 initialize_sbdata_filesystem() {
-    printf '%s READY: all destructive preconditions and image identity verified\n' \
-        "$(date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo unknown-time)" >>"$LOG_FILE"
-    "$UBIUPDATEVOL" "$VOLUME_DEVICE" "$SBDATA_IMAGE" >>"$LOG_FILE" 2>&1
+    operation_log 'ERASE_BEGIN volume=ubi0_5 name=sbdata; all destructive preconditions and image identity verified'
+    log_command "$UBIUPDATEVOL" "$VOLUME_DEVICE" "$SBDATA_IMAGE" || return $?
+    operation_log 'ERASE_COMPLETE filesystem image written to sbdata'
 }
 
 count_type() { find "$1" -type "$2" -print 2>/dev/null | wc -l | tr -d ' '; }
+
+verify_recovered_tree() {
+    find "$SOURCE" -type f -print | while IFS= read -r file; do
+        "$HELPER" verify-copy "$file" "$transaction/new/${file#"$SOURCE/"}" || {
+            printf 'VERIFY_COPY_FAILED file=%s\n' "$file" >&2
+            exit 1
+        }
+    done
+}
 
 install_rcs_hook() {
     marker='# STANDALONEBASE-EXTENDED-STORAGE'
@@ -423,10 +475,11 @@ install_rcs_hook() {
 initialize() {
     supplied=$1
     operation_lock=$ROOT/tmp/sbstorage-operation.lock
-    mkdir "$operation_lock" 2>/dev/null || { say ERROR=storage_operation_busy; exit 20; }
+    mkdir "$operation_lock" 2>/dev/null || { say ERROR=storage_operation_busy; system_log 'ERROR=storage_operation_busy EXIT_CODE=20'; exit 20; }
     trap 'rmdir "$operation_lock" 2>/dev/null || true' EXIT
     : >"$LOG_FILE" || exit 27
     stage CHECKING_SYSTEM
+    operation_log "OPERATION_BEGIN type=$OPERATION"
     if test "${2:-}" = erase-existing; then
         exact_sbdata || die 20 reinitialization_requires_exact_sbdata
         test ! -f "$REBOOT_MARKER" || die 20 reinitialization_reboot_pending
@@ -437,10 +490,10 @@ initialize() {
     test -d "$SOURCE" || die 20 visible_applet_tree_missing
     test -x "$HELPER" || die 20 module_verifier_missing
     test -f "$supplied" || die 22 authorized_module_missing
-    "$HELPER" verify-module "$supplied" >>"$LOG_FILE" 2>&1 || die 22 authorized_module_identity_mismatch
+    log_command "$HELPER" verify-module "$supplied" || die 22 authorized_module_identity_mismatch
     test -x "$UBIUPDATEVOL" || die 23 ubiupdatevol_missing
     test -f "$SBDATA_IMAGE" || die 23 sbdata_image_missing
-    "$HELPER" verify-sbdata-image "$SBDATA_IMAGE" >>"$LOG_FILE" 2>&1 || die 23 sbdata_image_identity_mismatch
+    log_command "$HELPER" verify-sbdata-image "$SBDATA_IMAGE" || die 23 sbdata_image_identity_mismatch
 
     stage PREPARING_STORAGE
     test -f "$ROOT/etc/init.d/rcS" && grep -q 'rcS.local' "$ROOT/etc/init.d/rcS" 2>/dev/null || die 20 rcs_local_not_supported
@@ -466,7 +519,7 @@ initialize() {
         test -x "$UBIMKVOL" || die 30 ubimkvol_unavailable
 
         stage CREATING_VOLUME
-        "$UBIMKVOL" "$UBI_DEVICE" -n 5 -N sbdata -S 521 -t dynamic >>"$LOG_FILE" 2>&1 \
+        log_command "$UBIMKVOL" "$UBI_DEVICE" -n 5 -N sbdata -S 521 -t dynamic \
             || die 31 volume_creation_failure
         post_create_attempt=1
         post_create_max_attempts=${SB_STORAGE_POST_CREATE_MAX_ATTEMPTS:-10}
@@ -474,9 +527,7 @@ initialize() {
             && test "$(value "$UBI/avail_eraseblocks")" = $((available - 521)); }; do
             test "$post_create_attempt" -lt "$post_create_max_attempts" \
                 || die 32 post_creation_validation_failure
-            printf '%s Waiting for UBI volume readiness (attempt %s/%s)\n' \
-                "$(date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo unknown-time)" \
-                "$post_create_attempt" "$post_create_max_attempts" >>"$LOG_FILE"
+            operation_log "Waiting for UBI volume readiness (attempt $post_create_attempt/$post_create_max_attempts)"
             sleep 1
             post_create_attempt=$((post_create_attempt + 1))
         done
@@ -489,22 +540,23 @@ initialize() {
     test "$(value "$VOLUME/upd_marker")" = 0 || die 23 post_update_marker_set
 
     stage LOADING_DRIVER
-    if ! has_fs; then insmod "$supplied" >>"$LOG_FILE" 2>&1 || die 22 module_load_failure; fi
+    if ! has_fs; then log_command insmod "$supplied" || die 22 module_load_failure; fi
     has_fs || die 22 sbubifs_not_registered
 
     stage MOUNTING
     mkdir -p "$MOUNT" || die 24 mountpoint_creation_failure
-    mount -t sbubifs ubi0:sbdata "$MOUNT" >>"$LOG_FILE" 2>&1 || die 24 mount_failure
+    log_command mount -t sbubifs ubi0:sbdata "$MOUNT" || die 24 mount_failure
     test "$(mounted_type "$MOUNT")" = sbubifs || die 24 mount_verification_failure
 
     stage COPYING_APPLETS
     mkdir -p "$DEST" || die 25 destination_creation_failure
-    cp -a "$SOURCE/." "$DEST/" >>"$LOG_FILE" 2>&1 || die 25 applet_migration_failure
+    operation_log "COPY_APPLETS source=$SOURCE destination=$DEST"
+    log_command cp -a "$SOURCE/." "$DEST/" || die 25 applet_migration_failure
 
     stage VERIFYING_APPLETS
     src_files=$(count_type "$SOURCE" f); dst_files=$(count_type "$DEST" f)
     src_dirs=$(count_type "$SOURCE" d); dst_dirs=$(count_type "$DEST" d)
-    printf 'source_files=%s destination_files=%s source_dirs=%s destination_dirs=%s\n' "$src_files" "$dst_files" "$src_dirs" "$dst_dirs" >>"$LOG_FILE"
+    operation_log "source_files=$src_files destination_files=$dst_files source_dirs=$src_dirs destination_dirs=$dst_dirs"
     test "$src_files" = "$dst_files" && test "$src_dirs" = "$dst_dirs" || die 26 migration_count_mismatch
     test -d "$DEST/AboutJive" -o -d "$DEST/SetupAppletInstaller" || die 26 core_applet_missing
     if test -d "$SOURCE/StandaloneBase"; then test -d "$DEST/StandaloneBase" || die 26 standalonebase_missing; fi
@@ -512,16 +564,17 @@ initialize() {
 
     stage INSTALLING_BOOT_SUPPORT
     mkdir -p "$PERSIST_DIR" || die 27 persistent_directory_failure
-    cp "$supplied" "$PERSIST_MODULE" || die 27 module_install_failure
-    "$HELPER" verify-module "$PERSIST_MODULE" >>"$LOG_FILE" 2>&1 || die 27 installed_module_identity_mismatch
-    cp "$APPLET_DIR/storage-boot.sh" "$PERSIST_BOOT" || die 27 boot_helper_install_failure
+    log_command cp "$supplied" "$PERSIST_MODULE" || die 27 module_install_failure
+    log_command "$HELPER" verify-module "$PERSIST_MODULE" || die 27 installed_module_identity_mismatch
+    log_command cp "$APPLET_DIR/storage-boot.sh" "$PERSIST_BOOT" || die 27 boot_helper_install_failure
     chmod 755 "$PERSIST_BOOT" || die 27 boot_helper_permission_failure
     touch "$REBOOT_MARKER" || die 27 reboot_marker_failure
-    install_rcs_hook || { rm -f "$REBOOT_MARKER"; die 27 rcs_local_install_failure; }
+    log_command install_rcs_hook || { rm -f "$REBOOT_MARKER"; die 27 rcs_local_install_failure; }
 
     stage FINISHING
     sync
     stage COMPLETE
+    operation_log 'OPERATION_COMPLETE EXIT_CODE=0 REBOOT_REQUIRED=1'
     printf 'EXIT_CODE=0\nREBOOT_REQUIRED=1\n' >>"$STATUS_FILE"
     printf 'STATUS=REBOOT_REQUIRED\nREBOOT_REQUIRED=1\n'
     exit 0
@@ -559,18 +612,19 @@ firmware_applet() {
 
 recover_existing() (
     # A subshell confines the cleanup trap and lock to this transaction.
-    recovery_eligible || { status_snapshot; exit 0; }
+    recovery_eligible || { system_log 'RECOVERY_SKIPPED preconditions_not_met'; check_storage; exit 0; }
     lock=$ROOT/tmp/sbstorage-operation.lock
-    mkdir "$lock" 2>/dev/null || exit 0
+    mkdir "$lock" 2>/dev/null || { system_log 'RECOVERY_SKIPPED storage_operation_busy'; exit 0; }
     recovery_mount=0
     cleanup_recovery() {
-        test "$recovery_mount" = 0 || umount "$MOUNT" >>"$LOG_FILE" 2>&1 || true
+        test "$recovery_mount" = 0 || log_command umount "$MOUNT" || true
         rmdir "$lock" 2>/dev/null || true
     }
     trap cleanup_recovery EXIT
     trap 'exit 1' HUP INT TERM
     : >"$LOG_FILE" || exit 27
     stage CHECKING_SYSTEM
+    operation_log 'OPERATION_BEGIN type=recover (non-destructive)'
     # Recheck after acquiring the lock; refuse foreign mounts or pending work.
     recovery_eligible || die 20 recovery_preconditions_changed
     test -z "$(mounted_type "$MOUNT")" || die 20 recovery_volume_already_mounted
@@ -582,12 +636,12 @@ recover_existing() (
     fi
     stage LOADING_DRIVER
     if ! has_fs; then
-        insmod "$BUNDLED_MODULE" >>"$LOG_FILE" 2>&1 || die 22 recovery_module_incompatible
+        log_command insmod "$BUNDLED_MODULE" || die 22 recovery_module_incompatible
     fi
     has_fs || die 22 recovery_filesystem_not_registered
     stage MOUNTING
     mkdir -p "$MOUNT" || die 24 recovery_mountpoint_failure
-    mount -t sbubifs -o ro ubi0:sbdata "$MOUNT" >>"$LOG_FILE" 2>&1 || die 24 recovery_readonly_mount_failed
+    log_command mount -t sbubifs -o ro ubi0:sbdata "$MOUNT" || die 24 recovery_readonly_mount_failed
     recovery_mount=1
     test "$(mounted_type "$MOUNT")" = sbubifs || die 24 recovery_mount_identity_failed
     test -d "$DEST/SetupAppletInstaller" && test -d "$DEST/StandaloneBase" \
@@ -599,6 +653,7 @@ recover_existing() (
     done
     required=$(du -sk "$SOURCE" "$DEST" | awk '{n += $1} END {print n + 4096}')
     free=$(df -Pk "$MOUNT" | awk 'NR==2 {print $4}')
+    operation_log "RECOVERY_SPACE required_kb=$required available_kb=$free"
     number "$required" && number "$free" && test "$free" -ge "$required" \
         || die 26 recovery_insufficient_space
     # Reject symlinks in an old custom tree before copying over it. Otherwise
@@ -610,7 +665,7 @@ recover_existing() (
         test -d "$old" && test ! -L "$old" || die 26 recovery_custom_tree_invalid
         test -z "$(find "$old" -type l -print)" || die 26 recovery_custom_symlinks_require_review
     done
-    mount -o remount,rw "$MOUNT" >>"$LOG_FILE" 2>&1 || die 24 recovery_remount_failed
+    log_command mount -o remount,rw "$MOUNT" || die 24 recovery_remount_failed
     transaction=$(mktemp -d "$MOUNT/.firmware-recovery.XXXXXX") || die 25 recovery_staging_failed
     stage COPYING_APPLETS
     mkdir "$transaction/new" || die 25 recovery_staging_failed
@@ -618,36 +673,37 @@ recover_existing() (
         test -e "$old" || continue
         name=${old##*/}
         firmware_applet "$name" && continue
-        cp -a "$old" "$transaction/new/" || die 25 recovery_custom_copy_failed
+        operation_log "COPY_CUSTOM_APPLET name=$name"
+        log_command cp -a "$old" "$transaction/new/" || die 25 recovery_custom_copy_failed
     done
     # Reinstalled applets win over their old copies. Core directories come
     # exclusively from the running firmware, never the previous image.
-    cp -a "$SOURCE/." "$transaction/new/" || die 25 recovery_firmware_copy_failed
+    operation_log "COPY_FIRMWARE_APPLETS source=$SOURCE destination=$transaction/new"
+    log_command cp -a "$SOURCE/." "$transaction/new/" || die 25 recovery_firmware_copy_failed
     stage VERIFYING_APPLETS
-    find "$SOURCE" -type f -print | while IFS= read -r file; do
-        "$HELPER" verify-copy "$file" "$transaction/new/${file#"$SOURCE/"}" || exit 1
-    done || die 26 recovery_copy_verification_failed
-    "$transaction/new/StandaloneBase/sb-storage-helper" verify-module "$BUNDLED_MODULE" \
-        >>"$LOG_FILE" 2>&1 || die 26 recovery_helper_verification_failed
+    log_command verify_recovered_tree || die 26 recovery_copy_verification_failed
+    log_command "$transaction/new/StandaloneBase/sb-storage-helper" verify-module "$BUNDLED_MODULE" \
+        || die 26 recovery_helper_verification_failed
     # Flush staging before promoting. The previous tree is retained in full.
     sync
-    mv "$DEST" "$transaction/previous-applets" || die 25 recovery_backup_failed
-    if ! mv "$transaction/new" "$DEST"; then
-        mv "$transaction/previous-applets" "$DEST" || die 25 recovery_rollback_requires_review
+    operation_log 'PROMOTING_APPLETS retaining previous tree for rollback'
+    log_command mv "$DEST" "$transaction/previous-applets" || die 25 recovery_backup_failed
+    if ! log_command mv "$transaction/new" "$DEST"; then
+        log_command mv "$transaction/previous-applets" "$DEST" || die 25 recovery_rollback_requires_review
         die 25 recovery_promotion_failed
     fi
     stage INSTALLING_BOOT_SUPPORT
     mkdir -p "$PERSIST_DIR" || die 27 recovery_persistent_directory_failed
-    cp "$BUNDLED_MODULE" "$PERSIST_MODULE.new" \
-        && "$HELPER" verify-module "$PERSIST_MODULE.new" >>"$LOG_FILE" 2>&1 \
+    log_command cp "$BUNDLED_MODULE" "$PERSIST_MODULE.new" \
+        && log_command "$HELPER" verify-module "$PERSIST_MODULE.new" \
         && mv "$PERSIST_MODULE.new" "$PERSIST_MODULE" || die 27 recovery_module_install_failed
-    cp "$APPLET_DIR/storage-boot.sh" "$PERSIST_BOOT.new" \
+    log_command cp "$APPLET_DIR/storage-boot.sh" "$PERSIST_BOOT.new" \
         && chmod 755 "$PERSIST_BOOT.new" \
         && mv "$PERSIST_BOOT.new" "$PERSIST_BOOT" || die 27 recovery_boot_install_failed
     if test -f "$RCS_LOCAL"; then
         cp -p "$RCS_LOCAL" "$transaction/rcS.local.before" || die 27 recovery_local_hook_backup_failed
     fi
-    install_rcs_hook || die 27 recovery_hook_install_failed
+    log_command install_rcs_hook || die 27 recovery_hook_install_failed
     if ! grep -q 'rcS.local' "$ROOT/etc/init.d/rcS"; then
         rcs=$ROOT/etc/init.d/rcS
         cp -p "$rcs" "$transaction/rcS.before" || die 27 recovery_rcs_backup_failed
@@ -663,6 +719,7 @@ recover_existing() (
     mv "$transaction" "$MOUNT/firmware-backup-${transaction##*.}" || die 27 recovery_backup_finalize_failed
     sync
     stage COMPLETE
+    operation_log 'OPERATION_COMPLETE EXIT_CODE=0 REBOOT_REQUIRED=1'
     printf 'EXIT_CODE=0\nREBOOT_REQUIRED=1\n' >>"$STATUS_FILE"
     say STATUS=REBOOT_REQUIRED
     say REBOOT_REQUIRED=1

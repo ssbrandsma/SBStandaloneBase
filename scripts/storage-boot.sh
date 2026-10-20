@@ -37,6 +37,7 @@ fail_open() {
     exit 0
 }
 
+log "activation started: checking existing volume and boot prerequisites"
 test -x "$HELPER" || fail_open "module verifier is missing"
 test -f "$MODULE" || fail_open "authorized module is missing"
 "$HELPER" verify-module "$MODULE" >/dev/null 2>&1 || fail_open "authorized module identity mismatch"
@@ -47,12 +48,14 @@ test "$(cat "$VOLUME/corrupted" 2>/dev/null)" = 0 || fail_open "sbdata is corrup
 test "$(cat "$VOLUME/upd_marker" 2>/dev/null)" = 0 || fail_open "sbdata update marker is set"
 
 if ! grep -q '^[[:space:]]*nodev[[:space:]]*sbubifs$' "$FILESYSTEMS" 2>/dev/null; then
+    log "loading authorized storage driver"
     insmod "$MODULE" >/dev/null 2>&1 || fail_open "sbubifs module load failed"
     MODULE_LOADED=1
 fi
 grep -q '^[[:space:]]*nodev[[:space:]]*sbubifs$' "$FILESYSTEMS" 2>/dev/null || fail_open "sbubifs did not register"
 
 if ! mounted_at "$MOUNT"; then
+    log "mounting existing sbdata volume"
     mkdir -p "$MOUNT" || fail_open "cannot create mount point"
     mount -t sbubifs ubi0:sbdata "$MOUNT" >/dev/null 2>&1 || fail_open "sbdata mount failed"
     MOUNT_CREATED=1
@@ -65,6 +68,7 @@ test -d "$SOURCE/StandaloneBase" || fail_open "StandaloneBase sentinel is absent
 test -d "$TARGET" || fail_open "stock applet tree is absent"
 
 if ! mounted_at "$TARGET"; then
+    log "activating extended applet tree with bind mount"
     mount -o bind "$SOURCE" "$TARGET" >/dev/null 2>&1 || fail_open "applet bind mount failed"
     BIND_CREATED=1
 fi

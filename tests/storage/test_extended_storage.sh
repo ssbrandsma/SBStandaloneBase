@@ -61,6 +61,8 @@ EOF
     cat >"$fixture/usr/sbin/ubiupdatevol" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"$SB_STORAGE_ROOT/tmp/ubiupdatevol.calls"
+echo fixture-updater-stdout
+echo fixture-updater-stderr >&2
 test "$1" = "$SB_STORAGE_ROOT/dev/ubi0_5" || exit 91
 test "$2" = "$SB_STORAGE_ROOT/usr/share/jive/applets/StandaloneBase/sbdata-empty.ubifs" || exit 92
 test "${SB_TEST_FAIL_UBIUPDATEVOL:-0}" = 1 && exit 9
@@ -70,6 +72,12 @@ fi
 exit 0
 EOF
     chmod 755 "$fixture/usr/sbin/ubimkvol" "$fixture/usr/sbin/ubiupdatevol"
+    cat >"$fixture/bin/logger" <<'EOF'
+#!/bin/sh
+cat >>"$SB_STORAGE_ROOT/tmp/syslog.messages"
+exit "${SB_TEST_LOGGER_FAIL:-0}"
+EOF
+    chmod 755 "$fixture/bin/logger"
     cp "$helper" "$fixture/usr/share/jive/applets/StandaloneBase/sb-storage-helper"
     cp "$setup" "$boot" "$module" "$image" "$fixture/usr/share/jive/applets/StandaloneBase/"
     test "$(basename "$image")" = sbdata-empty.ubifs || \
@@ -490,11 +498,20 @@ grep -q '^STAGE=COMPLETE$' "$fixture/tmp/sbstorage.status"
 expect_status REBOOT_REQUIRED
 test -d "$fixture/mnt/sbdata/applets/StandaloneBase"
 test -x "$fixture/etc/init.d/rcS.local"
+grep -q 'operation=reinitialize .*ERASE_BEGIN' "$fixture/tmp/syslog.messages"
+grep -q 'operation=reinitialize .*ERASE_COMPLETE' "$fixture/tmp/syslog.messages"
+grep -q fixture-updater-stdout "$fixture/tmp/syslog.messages"
+grep -q fixture-updater-stderr "$fixture/tmp/syslog.messages"
+grep -q fixture-updater-stdout "$fixture/tmp/sbstorage.log"
+grep -q fixture-updater-stderr "$fixture/tmp/sbstorage.log"
+grep -q 'operation=reinitialize .*COPY_APPLETS' "$fixture/tmp/syslog.messages"
+grep -q 'OPERATION_COMPLETE EXIT_CODE=0 REBOOT_REQUIRED=1' "$fixture/tmp/syslog.messages"
 make_base
 check | grep -q '^REINITIALIZATION_SUPPORTED=0$'
 set +e; run_reinitialize; rc=$?; set -e
 test "$rc" = 20
 assert_ubimkvol_not_called; assert_ubiupdatevol_not_called
+grep -q 'ERROR=reinitialization_requires_exact_sbdata EXIT_CODE=20' "$fixture/tmp/syslog.messages"
 make_base; add_volume wrongname
 set +e; run_reinitialize; rc=$?; set -e
 test "$rc" = 20; assert_ubiupdatevol_not_called
@@ -533,6 +550,7 @@ test -s "$report"
 grep -q 'FAIL ubi0_0.name expected=\[kernel_bak\] actual=\[wrong-kernel-name\]' "$report"
 grep -q 'FAIL ubi0_1.data_bytes expected=\[13676544\] actual=\[1\]' "$report"
 grep -q 'FAIL exact_virgin_layout' "$report"
+grep -q 'operation=check .*FAIL ubi0_0.name' "$fixture/tmp/syslog.messages"
 grep -q 'ubi0.avail_eraseblocks=660' "$report"
 test "$(stat -c %a "$report")" = 600
 test "$(wc -c <"$report")" -lt 32768
@@ -540,11 +558,15 @@ test "$(cat "$fixture/tmp/sbstorage.log")" = operation-log-sentinel
 test "$(cat "$fixture/tmp/sbstorage.status")" = operation-status-sentinel
 assert_ubimkvol_not_called; assert_ubiupdatevol_not_called
 printf 'unchanged-report-sentinel\n' >>"$report"
+syslog_size=$(wc -c <"$fixture/tmp/syslog.messages")
 check >/dev/null
+test "$(wc -c <"$fixture/tmp/syslog.messages")" = "$syslog_size"
 grep -q unchanged-report-sentinel "$report"
 SB_STORAGE_ROOT="$fixture" SB_STORAGE_APPLET_DIR="$fixture/usr/share/jive/applets/StandaloneBase" \
     sh "$setup" analyze >"$fixture/tmp/analysis-output"
 ! grep -q unchanged-report-sentinel "$report"
+grep -q 'operation=analyze .*CHECK_REPORT_BEGIN' "$fixture/tmp/syslog.messages"
+test "$(wc -c <"$fixture/tmp/syslog.messages")" -gt "$syslog_size"
 grep -q 'FAIL ubi0_0.name' "$fixture/tmp/analysis-output"
 assert_ubimkvol_not_called; assert_ubiupdatevol_not_called
 test ! -e "$fixture/tmp/mount.calls"
@@ -564,10 +586,23 @@ make_base; add_volume
 printf 'nodev\tsbubifs\n' >>"$fixture/proc/filesystems"
 printf 'ubi0:sbdata %s/mnt/sbdata sbubifs rw 0 0\nubi0:sbdata %s/usr/share/jive/applets sbubifs rw 0 0\n' "$fixture" "$fixture" >>"$fixture/proc/mounts"
 expect_status ACTIVE
-test ! -e "$fixture/tmp/sbstorage-check.log"
+test -s "$fixture/tmp/sbstorage-check.log"
+syslog_size=$(wc -c <"$fixture/tmp/syslog.messages")
+check >/dev/null
+test "$(wc -c <"$fixture/tmp/syslog.messages")" = "$syslog_size"
 SB_STORAGE_ROOT="$fixture" SB_STORAGE_APPLET_DIR="$fixture/usr/share/jive/applets/StandaloneBase" \
     sh "$setup" analyze >/dev/null
 test -s "$fixture/tmp/sbstorage-check.log"
 assert_ubimkvol_not_called; assert_ubiupdatevol_not_called
+# Syslog failure must not hide command failures or block read-only checks.
+make_base; add_volume
+set +e; SB_TEST_LOGGER_FAIL=1 run_reinitialize; rc=$?; set -e
+test "$rc" = 22
+grep -q '^ERROR=module_load_failure$' "$fixture/tmp/sbstorage.status"
+SB_TEST_LOGGER_FAIL=1 check >/dev/null
+make_base; add_volume
+set +e; SB_TEST_LOGGER_FAIL=1 SB_TEST_FAIL_UBIUPDATEVOL=1 run_reinitialize; rc=$?; set -e
+test "$rc" = 23
+grep -q '^ERROR=ubiupdatevol_failure$' "$fixture/tmp/sbstorage.status"
 
 echo extended-storage-tests-ok
