@@ -816,7 +816,7 @@ static int compatible(const info_t *i, char *r, size_t n)
 		i->leb_size > 0
 			? (long)((TARGET_BYTES + i->leb_size - 1) / i->leb_size)
 			: -1;
-	int layout773 = strstr(i->volumes, "0:kernel_bak") &&
+	int layout77x = strstr(i->volumes, "0:kernel_bak") &&
 			strstr(i->volumes, "1:cramfs_bak") &&
 			strstr(i->volumes, "2:ubifs") &&
 			strstr(i->volumes, "3:kernel") &&
@@ -839,7 +839,8 @@ static int compatible(const info_t *i, char *r, size_t n)
 		snprintf(r, n, "unsupported_kernel");
 		return 0;
 	}
-	if (strcmp(i->firmware, "7.7.3 r16676") &&
+	if (strcmp(i->firmware, "7.7.2 r9663") &&
+	    strcmp(i->firmware, "7.7.3 r16676") &&
 	    strcmp(i->firmware, "9.0.1 r17084")) {
 		snprintf(r, n, "unsupported_firmware");
 		return 0;
@@ -864,7 +865,8 @@ static int compatible(const info_t *i, char *r, size_t n)
 		snprintf(r, n, "unexpected_volume_layout");
 		return 0;
 	}
-	if ((!strcmp(i->firmware, "7.7.3 r16676") && !layout773) ||
+	if (((!strcmp(i->firmware, "7.7.2 r9663") ||
+	      !strcmp(i->firmware, "7.7.3 r16676")) && !layout77x) ||
 	    (!strcmp(i->firmware, "9.0.1 r17084") && !layout901)) {
 		snprintf(r, n, "missing_production_volume");
 		return 0;

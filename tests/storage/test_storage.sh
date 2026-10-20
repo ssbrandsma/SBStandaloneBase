@@ -41,6 +41,12 @@ reason(){ echo "$1" | grep -q "^prepare_reason=$2$"; }
 # Existing production layout without sbdata.
 out=$(run storage-status); echo "$out" | grep -q '^installation_state=absent$'
 out=$(run check); echo "$out" | grep -q '^compatible=true$'
+printf '7.7.2 r9663\n' >"$fixture/etc/squeezeos.version"
+out=$(run check); echo "$out" | grep -q '^compatible=true$'
+printf '7.7.1 r9000\n' >"$fixture/etc/squeezeos.version"
+set +e; out=$(run check); s=$?; set -e; test "$s" = 2
+echo "$out" | grep -q '^reason=unsupported_firmware$'
+printf '7.7.3 r16676\n' >"$fixture/etc/squeezeos.version"
 set +e; out=$(run prepare); s=$?; set -e; test "$s" = 2; reason "$out" migration_and_mount_safety_pending; echo "$out" | grep -q '^planned_volume=sbdata$'; echo "$out" | grep -q '^formatter_valid=true$'
 set +e; run install >/dev/null 2>&1; s=$?; set -e; test "$s" = 78
 set +e; run install >/dev/null 2>&1; s=$?; set -e; test "$s" = 78

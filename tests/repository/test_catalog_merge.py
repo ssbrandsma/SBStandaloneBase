@@ -12,7 +12,7 @@ import tempfile
 
 def applet(name, version, **extra):
     return dict(name=name, title=name, version=version, target='baby',
-                min_target_version='7.7.3', url='http://example.com/'+name+'.zip',
+                min_target_version='7.7.2', url='http://example.com/'+name+'.zip',
                 sha='a'*40, **extra)
 
 

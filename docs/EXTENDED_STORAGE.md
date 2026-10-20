@@ -98,7 +98,15 @@ No other operation calls `ubiupdatevol`: checks, mounting, boot, installation,
 upgrades, startup, UI navigation and mount failures remain non-destructive.
 Host tests replace `ubiupdatevol` with a mock and never write UBI or NAND.
 
-## Virgin 7.7.3 bootstrap
+## Virgin 7.7.2 / 7.7.3 bootstrap
+
+The initialization allowlist includes `7.7.2 r9663` and `7.7.3 r16676`.
+The 7.7.2 profile was inspected read-only on a physical Radio and matches
+the same five-volume geometry and 660 available LEBs. All exact layout,
+capacity, corruption/update-marker and pinned module/image checks remain
+mandatory. Firmware older than 7.7.2 is not accepted. Loading/mounting the
+driver and initializing flash on 7.7.2 still require device validation;
+metadata eligibility alone does not prove runtime compatibility.
 
 The physically measured factory-reset baseline is firmware `7.7.3 r16676`,
 kernel `2.6.26.8-rt16`, UBI0 with 1,014 total LEBs, 660 available LEBs,

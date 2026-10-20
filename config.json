@@ -1,6 +1,6 @@
 {
   "catalog_version": "1",
-  "standalone_base_version": "0.5.3",
+  "standalone_base_version": "0.5.4",
   "server": {
     "name": "Standalone Base",
     "uuid": "9d989f40-499a-4b85-b92f-8dc415af2a04",
@@ -15,13 +15,13 @@
     {
       "name": "StandaloneBase",
       "title": "Standalone Base",
-      "version": "0.5.3",
+      "version": "0.5.4",
       "target": "baby",
-      "min_target_version": "7.7.3",
-      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.5.3.zip",
-      "sha": "7a4fccb09639e8756c1ecd8c5b7620d0ea9da715",
+      "min_target_version": "7.7.2",
+      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.5.4.zip",
+      "sha": "30ba2dfdfddf74552d2f653bf5139fe64faa6937",
       "desc": "Local LMS-compatible infrastructure services for Squeezebox Radio.",
-      "changes": "Add bounded PNG and JPEG artwork resizing, streamed image downloads, and updated applet releases.",
+      "changes": "Lower minimum firmware to 7.7.2 and support its validated Extended Storage layout while retaining strict flash safety checks.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     },
@@ -56,7 +56,7 @@
       "title": "Qobuz Connect",
       "version": "0.1.2",
       "target": "baby",
-      "min_target_version": "7.7.3",
+      "min_target_version": "7.7.2",
       "url": "http://49.12.198.91/sbqobuzconnect/QobuzConnect-0.1.2.zip",
       "sha": "f1f24a4e377e6b6ee3e95d82b0c536a23f6e7b1e",
       "desc": "Qobuz Connect playback for Logitech Squeezebox Radio. Requires StandaloneBase.",

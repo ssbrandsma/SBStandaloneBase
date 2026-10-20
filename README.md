@@ -1,5 +1,9 @@
 # StandaloneBase
 
+The minimum advertised SqueezePlay firmware is 7.7.2. Extended Storage initial
+creation accepts the measured `7.7.2 r9663` layout with the same strict geometry
+and capacity checks as 7.7.3; see [Extended Storage](docs/EXTENDED_STORAGE.md).
+
 The web interface includes an authenticated **Virtual Radio** at `/remote` for
 live LCD capture and remote operation through the real Jive action system. See
 [`docs/VIRTUAL_RADIO_IMPLEMENTATION.md`](docs/VIRTUAL_RADIO_IMPLEMENTATION.md).

@@ -143,6 +143,16 @@ make_base; rm -rf "$fixture/sys/class/ubi/ubi0_4"; expect_status UNAVAILABLE
 make_base; expect_status AVAILABLE
 check | grep -q '^INITIALIZATION_SUPPORTED=1$'
 check | grep -q '^INITIALIZATION_REASON=validated_virgin_layout$'
+# 7.7.2 has the same measured five-volume profile as 7.7.3.
+make_base; printf '7.7.2 r9663\n' >"$fixture/etc/squeezeos.version"
+expect_status AVAILABLE
+check | grep -q '^INITIALIZATION_SUPPORTED=1$'
+check | grep -q '^INITIALIZATION_REASON=validated_virgin_layout$'
+printf '1\n' >"$fixture/sys/class/ubi/ubi0_1/corrupted"
+expect_status UNAVAILABLE
+assert_ubimkvol_not_called; assert_ubiupdatevol_not_called
+make_base; printf '7.7.1 r9000\n' >"$fixture/etc/squeezeos.version"
+expect_status UNAVAILABLE
 # Firmware 9.0.1 uses reordered production volumes, a larger cramfs, and may
 # have factory-managed bad eraseblocks. Its invariant geometry is also safe.
 make_901; expect_status AVAILABLE

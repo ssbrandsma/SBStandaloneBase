@@ -21,7 +21,7 @@ def main():
     executable,web=sys.argv[1:3]
     control={'mode':'valid','guard':True,'requests':[],'hold':threading.Event()}
     release=dict(name='StandaloneBase',title='Standalone Base',version='0.4.4',
-                 target='baby',min_target_version='7.7.3',
+                 target='baby',min_target_version='7.7.2',
                  url='http://example.com/StandaloneBase-0.4.4.zip',sha='a'*40)
 
     class Proxy(http.server.BaseHTTPRequestHandler):

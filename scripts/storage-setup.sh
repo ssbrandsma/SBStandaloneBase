@@ -61,7 +61,7 @@ stock_volume_exact() {
         && test "$(value "$stock/upd_marker")" = 0
 }
 
-stock_volume_set_773_exact() {
+stock_volume_set_77x_exact() {
     stock_volume_exact 0 kernel_bak 23 2967552 || return 1
     stock_volume_exact 1 cramfs_bak 106 13676544 || return 1
     stock_volume_exact 2 ubifs 82 10579968 || return 1
@@ -104,7 +104,7 @@ virgin_layout_exact() {
         && test -z "$(mounted_type "$SOURCE")" \
         || return 1
     case $firmware in
-        '7.7.3 r16676') test $((layout_available + layout_bad)) = 660 && stock_volume_set_773_exact ;;
+        '7.7.2 r9663'|'7.7.3 r16676') test $((layout_available + layout_bad)) = 660 && stock_volume_set_77x_exact ;;
         '9.0.1 r17084') test $((layout_available + layout_bad)) = 653 && stock_volume_set_901_exact ;;
         *) return 1 ;;
     esac
