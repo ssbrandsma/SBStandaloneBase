@@ -169,11 +169,13 @@ check | grep -q '^INITIALIZATION_SUPPORTED=1$'
 # valid inactive sbdata
 make_base; add_volume; expect_status AVAILABLE
 check | grep -q '^INITIALIZATION_SUPPORTED=1$'
+check | grep -q '^REINITIALIZATION_SUPPORTED=1$'
 # active sbdata
 mkdir -p "$fixture/mnt/sbdata/applets"
 printf 'nodev\tsbubifs\n' >>"$fixture/proc/filesystems"
 printf 'ubi0:sbdata %s/mnt/sbdata sbubifs rw 0 0\nubi0:sbdata %s/usr/share/jive/applets sbubifs rw 0 0\n' "$fixture" "$fixture" >>"$fixture/proc/mounts"
 expect_status ACTIVE
+check | grep -q '^REINITIALIZATION_SUPPORTED=0$'
 # wrong volume name
 make_base; add_volume wrongname; expect_status ERROR
 # missing module and factory-reset-like state
@@ -471,5 +473,52 @@ grep -q '^STAGE=COMPLETE$' "$fixture/tmp/sbstorage.status"
 grep -q '^REBOOT_REQUIRED=1$' "$fixture/tmp/sbstorage.status"
 test -d "$fixture/mnt/sbdata/applets/StandaloneBase"
 test -x "$fixture/etc/init.d/rcS.local"
+
+# Explicit destructive recovery never creates a new volume, and must be
+# confirmed. The fixture updater logs calls; no physical flash is touched.
+run_reinitialize() {
+    SB_STORAGE_ROOT="$fixture" SB_STORAGE_APPLET_DIR="$fixture/usr/share/jive/applets/StandaloneBase" \
+        sh "$setup" reinitialize --confirm-erase-sbdata \
+        "$fixture/usr/share/jive/applets/StandaloneBase/sbubifs-authorized.ko" >/dev/null
+}
+# Full mocked transaction restores boot support and copies current applets.
+reset_runtime
+run_reinitialize
+assert_ubimkvol_not_called
+test -s "$fixture/tmp/ubiupdatevol.calls"
+grep -q '^STAGE=COMPLETE$' "$fixture/tmp/sbstorage.status"
+expect_status REBOOT_REQUIRED
+test -d "$fixture/mnt/sbdata/applets/StandaloneBase"
+test -x "$fixture/etc/init.d/rcS.local"
+make_base
+check | grep -q '^REINITIALIZATION_SUPPORTED=0$'
+set +e; run_reinitialize; rc=$?; set -e
+test "$rc" = 20
+assert_ubimkvol_not_called; assert_ubiupdatevol_not_called
+make_base; add_volume wrongname
+set +e; run_reinitialize; rc=$?; set -e
+test "$rc" = 20; assert_ubiupdatevol_not_called
+make_base; add_volume
+set +e
+SB_STORAGE_ROOT="$fixture" sh "$setup" reinitialize >/dev/null 2>&1
+rc=$?; set -e
+test "$rc" = 64; assert_ubiupdatevol_not_called
+printf 'ubi0:sbdata %s/mnt/foreign sbubifs ro 0 0\n' "$fixture" >>"$fixture/proc/mounts"
+check | grep -q '^REINITIALIZATION_SUPPORTED=0$'
+set +e; run_reinitialize; rc=$?; set -e
+test "$rc" = 20; assert_ubiupdatevol_not_called
+make_base; add_volume
+mkdir -p "$fixture/mnt/storage/standalonebase"
+touch "$fixture/mnt/storage/standalonebase/extended-storage-reboot-required"
+check | grep -q '^REINITIALIZATION_SUPPORTED=0$'
+set +e; run_reinitialize; rc=$?; set -e
+test "$rc" = 20; assert_ubiupdatevol_not_called
+make_base; add_volume
+set +e; run_reinitialize; rc=$?; set -e
+# The real pinned driver is intentionally not loadable on the test host;
+# reaching driver loading proves the fixture-only updater ran after preflight.
+test "$rc" = 22
+assert_ubimkvol_not_called
+test -s "$fixture/tmp/ubiupdatevol.calls"
 
 echo extended-storage-tests-ok

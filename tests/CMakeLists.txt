@@ -4,6 +4,17 @@ add_test(NAME protocol COMMAND test_protocol)
 add_executable(test_nowplaying nowplaying/test_nowplaying.c ../native/sbbase/src/nowplaying.c)
 target_include_directories(test_nowplaying PRIVATE ../native/sbbase/include)
 add_test(NAME nowplaying_unit COMMAND test_nowplaying)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  find_package(Threads REQUIRED)
+  add_executable(test_mongoose_clock protocol/test_mongoose_clock.c
+    ../native/sbwebserver/third_party/mongoose.c)
+  target_include_directories(test_mongoose_clock PRIVATE ../native/sbwebserver/third_party)
+  target_compile_definitions(test_mongoose_clock PRIVATE _GNU_SOURCE
+    MG_ENABLE_EPOLL=0 MG_ENABLE_POLL=1)
+  target_link_libraries(test_mongoose_clock PRIVATE Threads::Threads
+    "-Wl,--wrap=clock_gettime" "-Wl,--wrap=gettimeofday")
+  add_test(NAME mongoose_clock_fallback COMMAND test_mongoose_clock)
+endif()
 add_test(NAME squeezeplay_artwork_patch COMMAND sh
   ${CMAKE_SOURCE_DIR}/tests/comet/test_artwork_patch.sh
   ${CMAKE_SOURCE_DIR}/scripts/patch-squeezeplay-artwork.sh)

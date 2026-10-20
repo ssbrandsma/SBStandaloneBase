@@ -15,6 +15,35 @@ eligible existing volume.
 
 ## Recovery transaction
 
+### Explicit erase alternative
+
+When an existing, validated `sbdata` volume is inactive (for example after a
+factory reset or a recovery-space failure), the Radio's Extended Storage menu
+also offers **Erase and reinitialize Extended Storage**. Recovery remains the
+automatic, non-destructive default. Cancel is the first confirmation option.
+The warning explains that all applets, custom stations, caches and backups on
+`sbdata` are permanently lost. Current applets from normal storage are copied
+back, boot support is installed, and a manual restart is required. Firmware and
+normal settings outside this dedicated volume are not erased.
+
+This option is deliberately unavailable while extended storage is active,
+mounted, reboot-pending, or another storage operation is running. Do not unmount
+a live applet tree to enable it. Unknown/damaged volumes remain locked out.
+The menu and confirmation reject Virtual Radio injected input. The native
+script independently rechecks the exact volume identity, geometry, mount state,
+driver and filesystem image before writing. Its explicit internal command is
+`storage-setup.sh reinitialize --confirm-erase-sbdata PATH-TO-sbubifs-authorized.ko`;
+the confirmation flag is an accident-prevention guard, not authentication.
+It reuses the existing initialization transaction and never creates a missing
+volume. Nothing automatically selects this destructive alternative after a
+recovery failure.
+
+Host fixtures cover menu visibility, cancellation, remote-input rejection,
+explicit confirmation, volume/mount/marker gates and the exact updater target.
+No physical-device erase validation has been performed for this menu addition.
+
+### Non-destructive recovery steps
+
 1. Validate the Baby platform, supported kernel release, exact existing volume
    geometry and clean update/corruption flags, original storage mount, and
    bundled driver's pinned identity. Free unallocated LEBs are not required.

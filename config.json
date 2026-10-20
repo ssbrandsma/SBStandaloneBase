@@ -1,6 +1,6 @@
 {
   "catalog_version": "1",
-  "standalone_base_version": "0.5.4",
+  "standalone_base_version": "0.5.5",
   "server": {
     "name": "Standalone Base",
     "uuid": "9d989f40-499a-4b85-b92f-8dc415af2a04",
@@ -15,13 +15,13 @@
     {
       "name": "StandaloneBase",
       "title": "Standalone Base",
-      "version": "0.5.4",
+      "version": "0.5.5",
       "target": "baby",
       "min_target_version": "7.7.2",
-      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.5.4.zip",
-      "sha": "30ba2dfdfddf74552d2f653bf5139fe64faa6937",
+      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.5.5.zip",
+      "sha": "d818619e6654e9e15991baf905ba0cba17f0c2b3",
       "desc": "Local LMS-compatible infrastructure services for Squeezebox Radio.",
-      "changes": "Lower minimum firmware to 7.7.2 and support its validated Extended Storage layout while retaining strict flash safety checks.",
+      "changes": "Restore catalog refresh on older kernels and add physically confirmed erase and reinitialization of inactive Extended Storage.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     },

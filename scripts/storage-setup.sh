@@ -32,6 +32,9 @@ say() { printf '%s\n' "$*"; }
 value() { test -r "$1" && sed -n '1p' "$1" 2>/dev/null || true; }
 mounted_type() { awk -v target="$1" '$2 == target { print $3; exit }' "$MOUNTS" 2>/dev/null; }
 has_fs() { grep -q '^[[:space:]]*nodev[[:space:]]*sbubifs$' "$FILESYSTEMS" 2>/dev/null; }
+sbdata_is_mounted() {
+    awk '$1 == "ubi0:sbdata" || $1 == "/dev/ubi0_5" { found=1 } END { exit found ? 0 : 1 }' "$MOUNTS" 2>/dev/null
+}
 bool() { if "$@"; then say 1; else say 0; fi; }
 
 device_node() { test -c "$1" || { test -n "$ROOT" && test -e "$1"; }; }
@@ -197,6 +200,14 @@ status_snapshot() {
     say "ACTIVE=$(test "$state" = ACTIVE && echo 1 || echo 0)"
     say "AVAILABLE=$(test "$state" = AVAILABLE && echo 1 || echo 0)"
     say "INITIALIZATION_SUPPORTED=$init_supported"
+    # Never offer destructive recovery for an active or unidentified volume.
+    reinit_supported=0
+    if test "$init_supported" = 1 && exact_sbdata \
+        && ! sbdata_is_mounted \
+        && test -z "$(mounted_type "$MOUNT")" \
+        && test -z "$(mounted_type "$SOURCE")" \
+        && test ! -f "$REBOOT_MARKER"; then reinit_supported=1; fi
+    say "REINITIALIZATION_SUPPORTED=$reinit_supported"
     say "INITIALIZATION_REASON=$init_reason"
     say "RECOVERY_SUPPORTED=$(bool recovery_eligible)"
 }
@@ -251,9 +262,13 @@ initialize() {
     trap 'rmdir "$operation_lock" 2>/dev/null || true' EXIT
     : >"$LOG_FILE" || exit 27
     stage CHECKING_SYSTEM
+    if test "${2:-}" = erase-existing; then
+        exact_sbdata || die 20 reinitialization_requires_exact_sbdata
+        test ! -f "$REBOOT_MARKER" || die 20 reinitialization_reboot_pending
+    fi
     test -d "$UBI" || die 20 unsupported_system_or_layout
     test "$(value "$UBI/min_io_size")" = 2048 || die 20 ubi_min_io_size_mismatch
-    awk '$1 == "ubi0:sbdata" || $1 == "/dev/ubi0_5" { found=1 } END { exit found ? 0 : 1 }' "$MOUNTS" 2>/dev/null && die 20 sbdata_is_mounted
+    sbdata_is_mounted && die 20 sbdata_is_mounted
     test -d "$SOURCE" || die 20 visible_applet_tree_missing
     test -x "$HELPER" || die 20 module_verifier_missing
     test -f "$supplied" || die 22 authorized_module_missing
@@ -499,5 +514,11 @@ case ${1:-} in
         test "$#" = 2 || { echo "usage: storage-setup.sh initialize PATH-TO-sbubifs-authorized.ko" >&2; exit 64; }
         initialize "$2"
         ;;
-    *) echo "usage: storage-setup.sh check | mount PATH-TO-sbubifs-authorized.ko | initialize PATH-TO-sbubifs-authorized.ko" >&2; exit 64 ;;
+    reinitialize)
+        test "$#" = 3 && test "$2" = --confirm-erase-sbdata || {
+            echo "usage: storage-setup.sh reinitialize --confirm-erase-sbdata PATH-TO-sbubifs-authorized.ko" >&2; exit 64;
+        }
+        initialize "$3" erase-existing
+        ;;
+    *) echo "usage: storage-setup.sh check | recover | mount MODULE | initialize MODULE | reinitialize --confirm-erase-sbdata MODULE" >&2; exit 64 ;;
 esac

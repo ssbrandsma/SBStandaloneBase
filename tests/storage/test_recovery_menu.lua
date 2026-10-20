@@ -4,8 +4,8 @@ local f = assert(io.open(root .. "/applet/StandaloneBaseApplet.lua"))
 local text = f:read("*a"); f:close()
 local source = assert(text:match("(function storageMenu%b().-)function confirmStorageInitialization"))
 ExtendedStorageState = assert(loadfile(root .. "/applet/ExtendedStorageState.lua"))()
-local status, header, items
-storage = {check=function() return {STATUS=status} end}
+local status, header, items, reinitialization
+storage = {check=function() return {STATUS=status, REINITIALIZATION_SUPPORTED=reinitialization} end}
 Window = function() return {addWidget=function() end,show=function() end} end
 SimpleMenu = function() return {addItem=function(_, item) items[#items+1]=item end,
     setHeaderWidget=function(_, value) header=value end} end
@@ -20,4 +20,33 @@ status="ACTIVE"; items={}; header=nil; storageMenu(self)
 assert(header==nil and items[2].text:find("Capacity"), "Active status must not show failure")
 status="ERROR"; items={}; storageMenu(self)
 assert(header:find("recovery stopped safely"), "Real errors must remain visible")
+status="AVAILABLE"; reinitialization=1; items={}; storageMenu(self)
+assert(header:find("recovery stopped safely"))
+assert(items[#items].text=="Erase and reinitialize Extended Storage")
+local selected=false
+self.confirmStorageErasure=function() selected=true end
+items[#items].callback(); assert(selected)
+storage.process=true; items={}; storageMenu(self)
+assert(#items==1, "Do not offer erasure during recovery")
+storage.process=nil; reinitialization=0; items={}; storageMenu(self)
+assert(#items==1, "Do not offer erasure without server-side eligibility")
+
+-- Exercise the actual confirmation UI, including remote-input rejection.
+local confirmation=assert(text:match("(function confirmStorageErasure%b().-)function startStorageInitialization"))
+assert((loadstring or load)(confirmation))()
+local hidden, started, injecting=false, false, false
+Window=function() return {addWidget=function() end,show=function() end,
+    hide=function() hidden=true end} end
+self.remoteBridge={isInjecting=function() return injecting end}
+self.startStorageInitialization=function(_, erase) started=erase end
+reinitialization=1; items={}; confirmStorageErasure(self)
+assert(header:find("Permanently erase ALL data"))
+assert(items[1].text=="Cancel")
+items[1].callback(); assert(hidden and not started)
+injecting=true; items[2].callback(); assert(not started)
+injecting=false; items[2].callback(); assert(started)
+items={}; injecting=true; confirmStorageErasure(self)
+assert(#items==0, "Remote input must not open the destructive confirmation")
+injecting=false; reinitialization=0; confirmStorageErasure(self)
+assert(#items==0, "Recheck eligibility before showing confirmation")
 print("recovery-menu-tests-ok")

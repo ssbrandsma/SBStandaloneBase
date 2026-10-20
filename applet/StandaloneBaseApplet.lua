@@ -213,7 +213,7 @@ function menu(self)
     for _,s in ipairs(SERVICES) do menu:addItem({text=s.name..": "..(alive(s) and "Running" or "Stopped")}) end
     menu:addItem({text="Extended Storage",callback=function() self:storageMenu() end})
     menu:addItem({text="Web Access",callback=function() if not self.remoteBridge:isInjecting() then self:webAccessMenu() end end})
-	menu:addItem({text="Version: 0.5.4"})
+	menu:addItem({text="Version: 0.5.5"})
     window:addWidget(menu); window:show()
 end
 function webAccessMenu(self)
@@ -298,6 +298,11 @@ function storageMenu(self)
     else
         menu:setHeaderWidget(Textarea("help_text","Extended Storage cannot be initialized on the detected storage layout."))
     end
+    if not storage.process and tonumber(s.REINITIALIZATION_SUPPORTED)==1 then
+        menu:addItem({text="Erase and reinitialize Extended Storage",callback=function()
+            self:confirmStorageErasure()
+        end})
+    end
     window:addWidget(menu); window:show()
 end
 
@@ -310,7 +315,28 @@ function confirmStorageInitialization(self)
     window:addWidget(menu); window:show()
 end
 
-function startStorageInitialization(self)
+function confirmStorageErasure(self)
+    if self.remoteBridge and self.remoteBridge:isInjecting() then return end
+    local s=storage:check()
+    if storage.process or tonumber(s.REINITIALIZATION_SUPPORTED)~=1 then return end
+    local window=Window("text_list","Erase Extended Storage?")
+    local menu=SimpleMenu("menu")
+    menu:setHeaderWidget(Textarea("help_text","Permanently erase ALL data on Extended Storage: installed applets, custom stations, caches and backups. Only the dedicated sbdata volume is erased; firmware and normal settings outside it remain unchanged. Current applets will be copied back. This cannot be undone. A restart is required."))
+    menu:addItem({text="Cancel",callback=function() window:hide() end})
+    menu:addItem({text="Erase all data and reinitialize",callback=function()
+        if self.remoteBridge and self.remoteBridge:isInjecting() then return end
+        window:hide()
+        self:startStorageInitialization(true)
+    end})
+    window:addWidget(menu); window:show()
+end
+
+function startStorageInitialization(self,eraseExisting)
+    if eraseExisting then
+        if self.remoteBridge and self.remoteBridge:isInjecting() then return end
+        local s=storage:check()
+        if storage.process or tonumber(s.REINITIALIZATION_SUPPORTED)~=1 then return end
+    end
     local window=Window("text_list","Extended Storage")
     window:setAllowScreensaver(false)
     local menu=SimpleMenu("menu")
@@ -324,7 +350,9 @@ function startStorageInitialization(self)
         if exitCode==0 then self:storageSuccess(window)
         else self:storageError(window,tonumber(status.EXIT_CODE) or exitCode,status.ERROR) end
     end
-    local ok=storage:startInitialization(progress,done)
+    local ok
+    if eraseExisting then ok=storage:startReinitialization(progress,done)
+    else ok=storage:startInitialization(progress,done) end
     if not ok then self:storageError(window,1) end
 end
 

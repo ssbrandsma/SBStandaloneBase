@@ -83,6 +83,11 @@ function Manager:startRecovery(progressCallback, doneCallback)
     return self:_startOperation("recover", progressCallback, doneCallback)
 end
 
+function Manager:startReinitialization(progressCallback, doneCallback)
+    return self:_startOperation("reinitialize --confirm-erase-sbdata " ..
+        self.root .. "/sbubifs-authorized.ko", progressCallback, doneCallback)
+end
+
 function Manager:stop()
     if self.pollTimer then self.pollTimer:stop(); self.pollTimer = nil end
     self.process = nil

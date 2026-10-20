@@ -19114,18 +19114,26 @@ uint64_t mg_millis(void) {
   return clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1000000;
 #elif MG_ARCH == MG_ARCH_UNIX
   struct timespec ts = {0, 0};
+  int clock_status = -1;
   // See #1615 - prefer monotonic clock
 #if defined(CLOCK_MONOTONIC_RAW)
   // Raw hardware-based time that is not subject to NTP adjustment
-  clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
-#elif defined(CLOCK_MONOTONIC)
-  // Affected by the incremental adjustments performed by adjtime and NTP
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-#else
-  // Affected by discontinuous jumps in the system time and by the incremental
-  // adjustments performed by adjtime and NTP
-  clock_gettime(CLOCK_REALTIME, &ts);
+  clock_status = clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
 #endif
+#if defined(CLOCK_MONOTONIC)
+  // SDK headers may define RAW even when the running kernel rejects it.
+  // Linux 2.6.26 on the Radio supports MONOTONIC but not MONOTONIC_RAW.
+  // Affected by the incremental adjustments performed by adjtime and NTP
+  if (clock_status != 0) clock_status = clock_gettime(CLOCK_MONOTONIC, &ts);
+#endif
+  if (clock_status != 0) {
+    struct timeval tv = {0, 0};
+    // Affected by discontinuous jumps in the system time and by the incremental
+    // adjustments performed by adjtime and NTP. Last resort on legacy systems.
+    if (gettimeofday(&tv, NULL) != 0) return (uint64_t) time(NULL) * 1000;
+    ts.tv_sec = tv.tv_sec;
+    ts.tv_nsec = tv.tv_usec * 1000;
+  }
   return ((uint64_t) ts.tv_sec * 1000 + (uint64_t) ts.tv_nsec / 1000000);
 #elif defined(ARDUINO)
   return (uint64_t) millis();
