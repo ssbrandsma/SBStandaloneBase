@@ -291,12 +291,12 @@ function storageMenu(self)
         menu:setHeaderWidget(Textarea("help_text","Additional internal storage is available on this Radio."))
         if tonumber(s.INITIALIZATION_SUPPORTED)==1 then
             menu:addItem({text="Initialize Storage",callback=function() self:confirmStorageInitialization() end})
-        else menu:addItem({text="Initialization prerequisites unavailable",style="item_info"}) end
+        else menu:addItem({text="Initialization prerequisites unavailable. See /tmp/sbstorage-check.log",style="item_info"}) end
     elseif s.STATUS=="REBOOT_REQUIRED" then
         menu:setHeaderWidget(Textarea("help_text","Extended Storage is ready. Restart the Radio to activate it."))
         menu:addItem({text="Restart Now",callback=function() appletManager:callService("reboot") end})
     else
-        menu:setHeaderWidget(Textarea("help_text","Extended Storage cannot be initialized on the detected storage layout."))
+        menu:setHeaderWidget(Textarea("help_text","Extended Storage cannot be initialized on the detected storage layout. Diagnostic details: /tmp/sbstorage-check.log."))
     end
     if not storage.process and tonumber(s.REINITIALIZATION_SUPPORTED)==1 then
         menu:addItem({text="Erase and reinitialize Extended Storage",callback=function()

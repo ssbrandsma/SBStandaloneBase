@@ -26,6 +26,7 @@ MOUNTS=$ROOT/proc/mounts
 FILESYSTEMS=$ROOT/proc/filesystems
 STATUS_FILE=$ROOT/tmp/sbstorage.status
 LOG_FILE=$ROOT/tmp/sbstorage.log
+CHECK_LOG=$ROOT/tmp/sbstorage-check.log
 REBOOT_MARKER=$PERSIST_DIR/extended-storage-reboot-required
 
 say() { printf '%s\n' "$*"; }
@@ -125,6 +126,170 @@ recovery_eligible() {
         && test -d "$SOURCE/StandaloneBase" \
         && test -x "$HELPER" \
         && "$HELPER" verify-module "$BUNDLED_MODULE" >/dev/null 2>&1
+}
+
+# Diagnostics run in subshells: their temporary variables must not alter the
+# initialization/recovery transaction. These functions never mount or write UBI.
+diagnostic_equal() {
+    if test "$3" = "$2"; then diagnostic_result=PASS; else diagnostic_result=FAIL; fi
+    printf '%s %s expected=[%s] actual=[%s]\n' "$diagnostic_result" "$1" "$2" "${3:-<missing>}"
+}
+
+diagnostic_test() {
+    diagnostic_label=$1; shift
+    if "$@"; then printf 'PASS %s\n' "$diagnostic_label"
+    else printf 'FAIL %s\n' "$diagnostic_label"; fi
+}
+
+diagnostic_stock() (
+    diagnostic_volume=$UBI_CLASS/ubi0_$1
+    diagnostic_equal "ubi0_$1.name" "$2" "$(value "$diagnostic_volume/name")"
+    diagnostic_equal "ubi0_$1.type" dynamic "$(value "$diagnostic_volume/type")"
+    diagnostic_equal "ubi0_$1.reserved_ebs" "$3" "$(value "$diagnostic_volume/reserved_ebs")"
+    diagnostic_equal "ubi0_$1.data_bytes" "$4" "$(value "$diagnostic_volume/data_bytes")"
+    diagnostic_equal "ubi0_$1.corrupted" 0 "$(value "$diagnostic_volume/corrupted")"
+    diagnostic_equal "ubi0_$1.upd_marker" 0 "$(value "$diagnostic_volume/upd_marker")"
+)
+
+layout_diagnostics() (
+    printf 'STORAGE_ANALYSIS time=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo unknown-time)"
+    printf 'Uptime: %s\n' "$(value "$ROOT/proc/uptime")"
+    printf 'No initialization, recovery, mount or flash write is performed by this analysis.\n'
+    printf '%s\n' '--- Platform and common prerequisites ---'
+    printf 'Firmware: %s\nKernel: %s\n' "$(value "$ROOT/etc/squeezeos.version")" "$(value "$ROOT/proc/sys/kernel/osrelease")"
+    grep -E '^(Processor|Hardware|Revision)[[:space:]]*:' "$ROOT/proc/cpuinfo" 2>/dev/null || true
+    diagnostic_test ubi0_directory test -d "$UBI"
+    diagnostic_test ubi0_device_node device_node "$UBI_DEVICE"
+    diagnostic_equal production_mount_type ubifs "$(mounted_type "$ROOT/mnt/storage")"
+    diagnostic_test applet_source test -d "$SOURCE"
+    diagnostic_test rcs_local_hook grep -q rcS.local "$ROOT/etc/init.d/rcS"
+    diagnostic_test helper_executable test -x "$HELPER"
+    diagnostic_test image_present test -f "$SBDATA_IMAGE"
+    diagnostic_test module_present test -f "$BUNDLED_MODULE"
+    diagnostic_test ubiupdatevol_executable test -x "$UBIUPDATEVOL"
+    printf 'Reboot marker: %s\nMount at sbdata: [%s]\nMount at applets: [%s]\n' \
+        "$(bool test -f "$REBOOT_MARKER")" "$(mounted_type "$MOUNT")" "$(mounted_type "$SOURCE")"
+    if test -e "$VOLUME"; then
+        printf '%s\n' '--- Existing sbdata identity checks ---'
+        diagnostic_test sbdata_device_node device_node "$VOLUME_DEVICE"
+        for diagnostic_pair in 'name sbdata' 'type dynamic' 'alignment 1' 'reserved_ebs 521' \
+            'data_bytes 67221504' 'usable_eb_size 129024' 'corrupted 0' 'upd_marker 0'; do
+            set -- $diagnostic_pair
+            diagnostic_equal "ubi0_5.$1" "$2" "$(value "$VOLUME/$1")"
+        done
+        diagnostic_equal ubi0.min_io_size 2048 "$(value "$UBI/min_io_size")"
+        diagnostic_equal recovery_kernel 2.6.26.8-rt16 "$(value "$ROOT/proc/sys/kernel/osrelease")"
+        diagnostic_test recovery_hardware grep -Eq 'Hardware[[:space:]]*:[[:space:]]*(Baby|Logitech MX25 Baby Board)' "$ROOT/proc/cpuinfo"
+        diagnostic_test recovery_core_applet test -d "$SOURCE/SetupAppletInstaller"
+        diagnostic_test exact_existing_sbdata exact_sbdata
+        diagnostic_test recovery_eligible recovery_eligible
+        printf 'Free unallocated LEBs are not required when reusing an existing sbdata volume.\n'
+    else
+        printf '%s\n' '--- New-volume layout checks ---'
+        diagnostic_equal ubi0.eraseblock_size 129024 "$(value "$UBI/eraseblock_size")"
+        diagnostic_equal ubi0.min_io_size 2048 "$(value "$UBI/min_io_size")"
+        diagnostic_equal ubi0.reserved_for_bad 10 "$(value "$UBI/reserved_for_bad")"
+        diagnostic_equal sbdata_mount_absent '' "$(mounted_type "$MOUNT")"
+        diagnostic_equal applet_bind_absent '' "$(mounted_type "$SOURCE")"
+        diagnostic_total=$(value "$UBI/total_eraseblocks")
+        diagnostic_bad=$(value "$UBI/bad_peb_count")
+        diagnostic_free=$(value "$UBI/avail_eraseblocks")
+        diagnostic_test total_eraseblocks_numeric number "$diagnostic_total"
+        diagnostic_test bad_peb_count_numeric number "$diagnostic_bad"
+        diagnostic_test available_lebs_numeric number "$diagnostic_free"
+        if number "$diagnostic_total" && number "$diagnostic_bad"; then
+            diagnostic_equal total_plus_bad 1014 "$((diagnostic_total + diagnostic_bad))"
+        fi
+        diagnostic_test minimum_600_available_lebs test "${diagnostic_free:-0}" -ge 600
+        diagnostic_test ubimkvol_executable test -x "$UBIMKVOL"
+        case $(value "$ROOT/etc/squeezeos.version") in
+            '7.7.2 r9663'|'7.7.3 r16676')
+                diagnostic_expected_free=660
+                diagnostic_stock 0 kernel_bak 23 2967552
+                diagnostic_stock 1 cramfs_bak 106 13676544
+                diagnostic_stock 2 ubifs 82 10579968
+                diagnostic_stock 3 kernel 23 2967552
+                diagnostic_stock 4 cramfs 106 13676544 ;;
+            '9.0.1 r17084')
+                diagnostic_expected_free=653
+                diagnostic_stock 0 kernel 23 2967552
+                diagnostic_stock 1 cramfs 113 14579712
+                diagnostic_stock 2 ubifs 82 10579968
+                diagnostic_stock 3 kernel_bak 23 2967552
+                diagnostic_stock 4 cramfs_bak 106 13676544 ;;
+            *) diagnostic_expected_free=; printf 'FAIL firmware_profile: no validated new-volume profile for this exact firmware\n' ;;
+        esac
+        if test -n "$diagnostic_expected_free" && number "$diagnostic_free" && number "$diagnostic_bad"; then
+            diagnostic_equal available_plus_bad "$diagnostic_expected_free" "$((diagnostic_free + diagnostic_bad))"
+        fi
+        for diagnostic_volume in "$UBI_CLASS"/ubi0_*; do
+            test -d "$diagnostic_volume" || continue
+            case ${diagnostic_volume##*_} in
+                0|1|2|3|4) ;;
+                *) printf 'FAIL unexpected_volume=%s\n' "${diagnostic_volume##*/}" ;;
+            esac
+        done
+        diagnostic_test exact_virgin_layout virgin_layout_exact
+    fi
+    printf '%s\n' '--- UBI controller and volume inventory (maximum 16 volumes) ---'
+    for diagnostic_field in total_eraseblocks avail_eraseblocks bad_peb_count reserved_for_bad eraseblock_size min_io_size; do
+        printf 'ubi0.%s=%s\n' "$diagnostic_field" "$(value "$UBI/$diagnostic_field")"
+    done
+    diagnostic_count=0
+    for diagnostic_volume in "$UBI_CLASS"/ubi0_*; do
+        test -d "$diagnostic_volume" || continue
+        diagnostic_count=$((diagnostic_count + 1))
+        test "$diagnostic_count" -le 16 || { printf 'Inventory truncated\n'; break; }
+        for diagnostic_field in name type alignment reserved_ebs data_bytes usable_eb_size corrupted upd_marker; do
+            printf '%s.%s=%s\n' "${diagnostic_volume##*/}" "$diagnostic_field" "$(value "$diagnostic_volume/$diagnostic_field")"
+        done
+    done
+    printf '%s\n' '--- MTD layout ---'
+    head -n 32 "$ROOT/proc/mtd" 2>/dev/null || true
+    printf '%s\n' '--- Mounts ---'
+    head -n 64 "$MOUNTS" 2>/dev/null || true
+    printf '%s\n' '--- Registered filesystems ---'
+    head -n 64 "$FILESYSTEMS" 2>/dev/null || true
+    printf '%s\n' '--- Device nodes and prerequisites ---'
+    ls -ld "$UBI_DEVICE" "$VOLUME_DEVICE" "$HELPER" "$BUNDLED_MODULE" "$SBDATA_IMAGE" "$UBIMKVOL" "$UBIUPDATEVOL" 2>&1 || true
+    printf '%s\n' '--- Normal storage capacity ---'
+    df -Pk "$ROOT/mnt/storage" 2>&1 || true
+)
+
+write_check_report() (
+    # One bounded snapshot, never an append-only polling log. Unchanged failed
+    # checks skip the expensive inventory. Do not overwrite operation logs.
+    diagnostic_signature=$(printf '%s\n' "$1" | cksum 2>/dev/null) || diagnostic_signature=
+    if test -n "$diagnostic_signature" && test "${2:-}" != analyze \
+        && test "$(value "$CHECK_LOG")" = "SNAPSHOT=$diagnostic_signature"; then exit 0; fi
+    umask 077
+    diagnostic_tmp=$(mktemp "$ROOT/tmp/sbstorage-check.XXXXXX") || exit 1
+    trap 'rm -f "$diagnostic_tmp"' EXIT
+    {
+        printf 'SNAPSHOT=%s\n%s\n' "${diagnostic_signature:-uncached}" "$1"
+        layout_diagnostics
+        if test -x "$HELPER"; then
+            if printf '%s\n' "$1" | grep -q '^BUNDLED_MODULE_VALID=0$'; then
+                printf '%s\n' '--- Module verifier failure details ---'
+                "$HELPER" verify-module "$BUNDLED_MODULE" 2>&1 | head -n 20
+            fi
+            if printf '%s\n' "$1" | grep -q '^SBDATA_IMAGE_VALID=0$'; then
+                printf '%s\n' '--- Image verifier failure details ---'
+                "$HELPER" verify-sbdata-image "$SBDATA_IMAGE" 2>&1 | head -n 20
+            fi
+        fi
+    } >"$diagnostic_tmp" 2>&1
+    mv "$diagnostic_tmp" "$CHECK_LOG"
+)
+
+check_storage() {
+    diagnostic_snapshot=$(status_snapshot)
+    printf '%s\n' "$diagnostic_snapshot"
+    if test "${1:-}" = analyze || ! printf '%s\n' "$diagnostic_snapshot" | grep -Eq '^STATUS=(ACTIVE|REBOOT_REQUIRED)$'; then
+        write_check_report "$diagnostic_snapshot" "${1:-}" || printf 'Storage diagnostic report could not be saved\n' >&2
+    fi
+    printf 'DIAGNOSTIC_LOG=/tmp/sbstorage-check.log\n'
+    if test "${1:-}" = analyze; then cat "$CHECK_LOG"; fi
 }
 
 status_snapshot() {
@@ -504,7 +669,8 @@ recover_existing() (
 )
 
 case ${1:-} in
-    check) status_snapshot ;;
+    check) check_storage ;;
+    analyze) check_storage analyze ;;
     recover) recover_existing ;;
     mount)
         test "$#" = 2 || { echo "usage: storage-setup.sh mount PATH-TO-sbubifs-authorized.ko" >&2; exit 64; }
@@ -520,5 +686,5 @@ case ${1:-} in
         }
         initialize "$3" erase-existing
         ;;
-    *) echo "usage: storage-setup.sh check | recover | mount MODULE | initialize MODULE | reinitialize --confirm-erase-sbdata MODULE" >&2; exit 64 ;;
+    *) echo "usage: storage-setup.sh check | analyze | recover | mount MODULE | initialize MODULE | reinitialize --confirm-erase-sbdata MODULE" >&2; exit 64 ;;
 esac

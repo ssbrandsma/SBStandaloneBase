@@ -50,8 +50,8 @@ Read-only inspection:
 /bin/sh /usr/share/jive/applets/StandaloneBase/storage-setup.sh check
 ```
 
-The command does not create files, directories, mounts, modules, or volumes.
-It emits `KEY=value` records including:
+The command does not modify flash, mounts, modules, or volumes. It emits
+`KEY=value` records including:
 
 ```text
 STATUS=AVAILABLE
@@ -66,12 +66,47 @@ USED_KB=0
 FREE_KB=0
 INITIALIZATION_SUPPORTED=1
 INITIALIZATION_REASON=validated_packaged_image
+DIAGNOSTIC_LOG=/tmp/sbstorage-check.log
 ```
 
 Status is one of `UNSUPPORTED`, `UNAVAILABLE`, `AVAILABLE`, `ACTIVE`, `ERROR`,
 or `REBOOT_REQUIRED`. Capacity is read from `df` only while `sbdata` is mounted;
 it is never hardcoded. A factory reset that leaves `ubi0_5` but removes the
 module and boot hook is reported as `AVAILABLE`, not as an unexplained error.
+
+### Diagnosing an unsupported layout
+
+When status is neither active nor reboot-pending, `check` automatically saves a
+bounded diagnostic snapshot to **`/tmp/sbstorage-check.log`** (RAM only, mode
+0600). Repeated checks with unchanged status output reuse the snapshot instead
+of repeatedly collecting the full inventory. This file is separate from
+`/tmp/sbstorage.log`, which records initialization and recovery operations.
+Opening the Radio's Extended Storage menu invokes the check; its failure
+message identifies the diagnostic path. A failed report write does not prevent
+the status result from being returned.
+
+For a fresh, detailed analysis without initializing or mounting anything:
+
+```sh
+/bin/sh /usr/share/jive/applets/StandaloneBase/storage-setup.sh analyze
+cat /tmp/sbstorage-check.log
+```
+
+The report contains the normal status output, timestamp, exact firmware/kernel,
+hardware identification, prerequisite checks, expected-versus-actual values,
+and PASS/FAIL markers. It includes all stock volume identities and sizes, UBI
+geometry, bad/free block accounting (including the 600-LEB minimum), unexpected
+volumes, existing sbdata identity and health, mounts, MTD layout, device-node
+permissions, registered filesystems, normal storage capacity and failing
+module/image verifier output. The raw inventory is bounded to 16 UBI volumes
+and fixed-length kernel-file excerpts. It does not dump configuration, pairing
+codes, credentials, applet contents or full kernel logs.
+
+`analyze` always refreshes the report, including for an active device. It is
+diagnostic only: no module loading, mounts, recovery, UBI updates or formatting.
+There is no persistent log history and no new NAND writes. Collect the report
+before restarting because `/tmp` is cleared at reboot. For an operation that
+actually failed, collect `/tmp/sbstorage.log` and `/tmp/sbstorage.status` too.
 
 The initialization interface is:
 

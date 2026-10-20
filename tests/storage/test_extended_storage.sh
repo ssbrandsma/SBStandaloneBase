@@ -521,4 +521,53 @@ test "$rc" = 22
 assert_ubimkvol_not_called
 test -s "$fixture/tmp/ubiupdatevol.calls"
 
+# Detailed analysis is RAM-only and does not touch initialization/recovery logs.
+make_base
+printf 'operation-log-sentinel\n' >"$fixture/tmp/sbstorage.log"
+printf 'operation-status-sentinel\n' >"$fixture/tmp/sbstorage.status"
+printf 'wrong-kernel-name\n' >"$fixture/sys/class/ubi/ubi0_0/name"
+printf '1\n' >"$fixture/sys/class/ubi/ubi0_1/data_bytes"
+expect_status UNAVAILABLE
+report="$fixture/tmp/sbstorage-check.log"
+test -s "$report"
+grep -q 'FAIL ubi0_0.name expected=\[kernel_bak\] actual=\[wrong-kernel-name\]' "$report"
+grep -q 'FAIL ubi0_1.data_bytes expected=\[13676544\] actual=\[1\]' "$report"
+grep -q 'FAIL exact_virgin_layout' "$report"
+grep -q 'ubi0.avail_eraseblocks=660' "$report"
+test "$(stat -c %a "$report")" = 600
+test "$(wc -c <"$report")" -lt 32768
+test "$(cat "$fixture/tmp/sbstorage.log")" = operation-log-sentinel
+test "$(cat "$fixture/tmp/sbstorage.status")" = operation-status-sentinel
+assert_ubimkvol_not_called; assert_ubiupdatevol_not_called
+printf 'unchanged-report-sentinel\n' >>"$report"
+check >/dev/null
+grep -q unchanged-report-sentinel "$report"
+SB_STORAGE_ROOT="$fixture" SB_STORAGE_APPLET_DIR="$fixture/usr/share/jive/applets/StandaloneBase" \
+    sh "$setup" analyze >"$fixture/tmp/analysis-output"
+! grep -q unchanged-report-sentinel "$report"
+grep -q 'FAIL ubi0_0.name' "$fixture/tmp/analysis-output"
+assert_ubimkvol_not_called; assert_ubiupdatevol_not_called
+test ! -e "$fixture/tmp/mount.calls"
+make_base
+printf '599\n' >"$fixture/sys/class/ubi/ubi0/avail_eraseblocks"
+check >/dev/null
+grep -q 'FAIL minimum_600_available_lebs' "$fixture/tmp/sbstorage-check.log"
+grep -q 'FAIL available_plus_bad expected=\[660\] actual=\[599\]' "$fixture/tmp/sbstorage-check.log"
+make_base
+printf '7.7.3 unknown-build\n' >"$fixture/etc/squeezeos.version"
+check >/dev/null
+grep -q 'FAIL firmware_profile' "$fixture/tmp/sbstorage-check.log"
+make_base; add_volume wrongname
+check >/dev/null
+grep -q 'FAIL ubi0_5.name expected=\[sbdata\] actual=\[wrongname\]' "$fixture/tmp/sbstorage-check.log"
+make_base; add_volume
+printf 'nodev\tsbubifs\n' >>"$fixture/proc/filesystems"
+printf 'ubi0:sbdata %s/mnt/sbdata sbubifs rw 0 0\nubi0:sbdata %s/usr/share/jive/applets sbubifs rw 0 0\n' "$fixture" "$fixture" >>"$fixture/proc/mounts"
+expect_status ACTIVE
+test ! -e "$fixture/tmp/sbstorage-check.log"
+SB_STORAGE_ROOT="$fixture" SB_STORAGE_APPLET_DIR="$fixture/usr/share/jive/applets/StandaloneBase" \
+    sh "$setup" analyze >/dev/null
+test -s "$fixture/tmp/sbstorage-check.log"
+assert_ubimkvol_not_called; assert_ubiupdatevol_not_called
+
 echo extended-storage-tests-ok

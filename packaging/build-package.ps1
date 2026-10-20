@@ -103,7 +103,7 @@ $Url = $BaseUrl.TrimEnd('/') + '/' + [IO.Path]::GetFileName($ZipPath)
 $Xml = @"
 <?xml version="1.0" encoding="UTF-8"?>
 <extensions><details><title lang="EN">StandaloneBase Applet Repository</title></details><applets>
-<applet name="StandaloneBase" version="$Version" target="baby" minTarget="7.7.2" maxTarget="*"><title lang="EN">Standalone Base</title><desc lang="EN">Local LMS-compatible infrastructure services for Squeezebox Radio.</desc><changes lang="EN">Restore catalog refresh on older kernels and add physically confirmed erase and reinitialization of inactive Extended Storage.</changes><creator>Sjoerd Brandsma</creator><url>$Url</url><sha>$Sha1</sha></applet>
+<applet name="StandaloneBase" version="$Version" target="baby" minTarget="7.7.2" maxTarget="*"><title lang="EN">Standalone Base</title><desc lang="EN">Local LMS-compatible infrastructure services for Squeezebox Radio.</desc><changes lang="EN">Restore catalog refresh on older kernels, add physically confirmed storage reinitialization, and provide detailed read-only Extended Storage analysis.</changes><creator>Sjoerd Brandsma</creator><url>$Url</url><sha>$Sha1</sha></applet>
 </applets></extensions>
 "@
 $Utf8 = New-Object Text.UTF8Encoding($false)
