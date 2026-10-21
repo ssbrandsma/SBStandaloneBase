@@ -1,6 +1,6 @@
 {
   "catalog_version": "1",
-  "standalone_base_version": "0.5.6",
+  "standalone_base_version": "0.5.8",
   "server": {
     "name": "Standalone Base",
     "uuid": "9d989f40-499a-4b85-b92f-8dc415af2a04",
@@ -15,26 +15,26 @@
     {
       "name": "StandaloneBase",
       "title": "Standalone Base",
-      "version": "0.5.6",
+      "version": "0.5.8",
       "target": "baby",
       "min_target_version": "7.7.2",
-      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.5.6.zip",
-      "sha": "6ecaf351d9460bd4b8623351b524bf24b66ce03c",
+      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.5.8.zip",
+      "sha": "f2ea54078b3d3352c6e4c0a33f4db56f4af02446",
       "desc": "Local LMS-compatible infrastructure services for Squeezebox Radio.",
-      "changes": "Log Extended Storage checks, analysis, erase, initialization, applet copying and recovery progress to the system log for easy export.",
+      "changes": "Fix the managed Applet Installer integration and safe ZIP extraction on Extended Storage; add redacted HTTP tracing across Jive, proxy, HLS, artwork and catalog requests.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     },
     {
       "name": "StandaloneRadio",
       "title": "Standalone Radio",
-      "version": "0.9.8",
+      "version": "0.9.10",
       "target": "baby",
       "min_target_version": "7.7",
-      "url": "http://49.12.198.91/sbstandalone/StandaloneRadio-0.9.8.zip",
-      "sha": "8e3f27cb0eecf4cd5ceadbda96259f4ccf5d04ff",
+      "url": "http://49.12.198.91/sbstandalone/StandaloneRadio-0.9.10.zip",
+      "sha": "c7631104fa1df31736d35ec58294eae96858dee5",
       "desc": "Standalone internet radio playback for Logitech Squeezebox Radio.",
-      "changes": "Improve RadioFeeds and HLS playback, metadata and artwork integration; restore playback control when switching LMS servers.",
+      "changes": "Add correlated HTTP diagnostics for station streams, logos and artwork with updated Standalone Base; use the RadioFeeds-approved Standalone user agent.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     },

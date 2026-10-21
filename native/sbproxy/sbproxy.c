@@ -24,7 +24,9 @@
 #include <time.h>
 #include <unistd.h>
 #include "../common/public_address.h"
+#include "../common/http_trace.h"
 #include "hls.h"
+#include "http_trace_curl.h"
 
 /** Enforce opt-in public destinations on actual sockets, including redirects.
  */
@@ -61,7 +63,7 @@ static curl_socket_t public_image_socket(void *data,
 	return socket(address->family, address->socktype, address->protocol);
 }
 
-#define VERSION "0.5.6"
+#define VERSION "0.5.8"
 
 #define MAX_REQUEST 16384
 #define MAX_HEADERS 32768
@@ -76,6 +78,7 @@ typedef struct {
 	int fd;
 	int started;
 	int status;
+    sb_http_trace trace;
 
 	char headers[MAX_HEADERS + 1];
 
@@ -406,6 +409,7 @@ static size_t header_cb(char *data, size_t size, size_t count, void *opaque)
 		const char *space = memchr(data, ' ', length);
 
 		ctx->status = space ? atoi(space + 1) : 0;
+        sb_trace_header(&ctx->trace,ctx->status,data,length);
 		ctx->length = 0;
 		ctx->headers[0] = '\0';
 		ctx->svg = 0;
@@ -419,6 +423,7 @@ static size_t header_cb(char *data, size_t size, size_t count, void *opaque)
 	 * Do not forward informational or redirect headers because
 	 * libcurl handles redirects internally.
 	 */
+    sb_trace_header(&ctx->trace,0,data,length);
 	if ((length == 2 && data[0] == '\r' && data[1] == '\n') ||
 	    (length == 1 && data[0] == '\n')) {
 
@@ -604,6 +609,7 @@ static struct curl_slist *build_request_headers(char *request, int public_only)
 		     !strcasecmp(name, "If-Modified-Since")) &&
 		    strcasecmp(name, "host") &&
 		    strcasecmp(name, "x-sb-public-fetch") &&
+            strcasecmp(name, "x-sb-trace-id") &&
 		    !is_static_hop_header(name) &&
 		    !token_contains(tokens, name)) {
 
@@ -1001,6 +1007,9 @@ static void *worker_main(void *opaque)
 	memset(&transfer, 0, sizeof(transfer));
 
 	transfer.fd = fd;
+    char parent_trace[80];
+    sb_trace_parent(request,parent_trace,sizeof parent_trace);
+    sb_trace_begin(&transfer.trace,"proxy",method,url,parent_trace);
 	if (artwork) {
 		transfer.artwork_source = url;
 		transfer.width = width;
@@ -1009,6 +1018,7 @@ static void *worker_main(void *opaque)
 	}
 
 	configure_curl(curl, url, headers, &transfer, is_head, curl_error);
+    sb_trace_curl(curl,&transfer.trace);
 	/* Opt-in only: ordinary compatibility-proxy requests retain their
 	 * policy. */
 	if (artwork || plain_http || hls ||
@@ -1075,7 +1085,8 @@ static void *worker_main(void *opaque)
 			}
 			line = end;
 		}
-		hls_relay(curl, fd, url, is_head, is_head ? 0 : expected_codec);
+		hls_relay(curl, fd, url, is_head, is_head ? 0 : expected_codec, transfer.trace.id);
+        sb_trace_log("event=session_end id=%s source=hls",transfer.trace.id);
 		goto done;
 	}
 	log_request(method, target);
@@ -1100,6 +1111,7 @@ static void *worker_main(void *opaque)
 	}
 
 	log_transfer_result(result, curl_error, &transfer, &start, &end);
+    sb_trace_end(&transfer.trace,transfer.status,(unsigned long long)transfer.bytes,result==CURLE_OK ? NULL : curl_easy_strerror(result));
 
 done:
 	if (curl) {

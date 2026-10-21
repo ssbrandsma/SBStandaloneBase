@@ -89,6 +89,8 @@ def validate_package(path: Path) -> tuple[list[str], str]:
         if any("/" in name or "\\" in name or name in (".", "..") for name in names):
             raise ValueError("package entries must all be flat file names")
         missing = sorted(REQUIRED.difference(names))
+        if tuple(map(int, match.group(1).split('.'))) >= (0, 5, 7) and "InstallerCompat.lua" not in names:
+            missing.append("InstallerCompat.lua")
         if missing:
             raise ValueError("package is missing: " + ", ".join(missing))
         bad = [entry.filename for entry in infos if entry.is_dir()]

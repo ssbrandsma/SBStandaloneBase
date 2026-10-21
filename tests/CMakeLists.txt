@@ -6,6 +6,9 @@ target_include_directories(test_nowplaying PRIVATE ../native/sbbase/include)
 add_test(NAME nowplaying_unit COMMAND test_nowplaying)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   find_package(Threads REQUIRED)
+  add_executable(test_http_trace images/test_http_trace.c)
+  target_link_libraries(test_http_trace PRIVATE Threads::Threads)
+  add_test(NAME http_trace_native COMMAND test_http_trace)
   add_executable(test_mongoose_clock protocol/test_mongoose_clock.c
     ../native/sbwebserver/third_party/mongoose.c)
   target_include_directories(test_mongoose_clock PRIVATE ../native/sbwebserver/third_party)
@@ -37,6 +40,10 @@ if(LUA_EXECUTABLE)
     ${CMAKE_CURRENT_SOURCE_DIR}/images/test_artwork.lua ${CMAKE_SOURCE_DIR})
   add_test(NAME image_helper_lua COMMAND ${LUA_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/images/test_image_helper.lua ${CMAKE_SOURCE_DIR})
+  add_test(NAME installer_compat_lua COMMAND ${LUA_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/images/test_installer_compat.lua ${CMAKE_SOURCE_DIR})
+  add_test(NAME http_trace_lua COMMAND ${LUA_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/images/test_http_trace.lua ${CMAKE_SOURCE_DIR})
   add_test(NAME extended_storage_lua_state COMMAND ${LUA_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/storage/test_extended_storage_state.lua
     ${CMAKE_SOURCE_DIR}/applet)

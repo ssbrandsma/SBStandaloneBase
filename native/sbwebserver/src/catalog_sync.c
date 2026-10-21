@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include "../../common/http_trace.h"
 
 #define CATALOG_PATH "/https/raw.githubusercontent.com/ssbrandsma/SBStandaloneBase/master/config.json"
 #define CATALOG_LIMIT 16384u
@@ -25,6 +26,9 @@ static struct {
 	time_t last_success;
 	int initialized, pending, health, done, ready_to_fetch, failures, changed;
 	const char *state, *message;
+    sb_http_trace trace;
+    int trace_status;
+    size_t trace_bytes;
 } sync_state;
 
 /** Reject malformed or oversized lengths without integer-overflow conversions. */
@@ -46,6 +50,7 @@ static int oversized_length(struct mg_str value)
 /** Report a bounded failure and schedule a monotonic, capped retry. */
 static void sync_failed(const char *message)
 {
+    sb_trace_end(&sync_state.trace,sync_state.trace_status,(unsigned long long)sync_state.trace_bytes,message);
 	static const unsigned retry_ms[] = {60000, 300000, 900000, 3600000};
 	unsigned index = (unsigned)sync_state.failures;
 	if (index > 3)
@@ -71,18 +76,21 @@ static void sync_event(struct mg_connection *connection, int event, void *data)
 			  "Accept: application/json\r\nAccept-Encoding: identity\r\n"
 			  "User-Agent: StandaloneBaseCatalog/1.0\r\n"
 			  "Cache-Control: no-cache\r\nX-SB-Public-Fetch: 1\r\n"
-			  "Connection: close\r\n\r\n",
-			  sync_state.health ? "/health" : CATALOG_PATH);
+			  "Connection: close\r\nX-SB-Trace-Id: %s\r\n\r\n",
+			  sync_state.health ? "/health" : CATALOG_PATH,sync_state.trace.id);
 	} else if (event == MG_EV_READ && !sync_state.done &&
 		   connection->recv.len > CATALOG_LIMIT + 8192u) {
 		sync_failed("Response exceeds size limit");
 	} else if (event == MG_EV_HTTP_HDRS && !sync_state.done) {
 		struct mg_http_message *message = data;
 		struct mg_str *length = mg_http_get_header(message, "Content-Length");
+        sync_state.trace_status=mg_http_status(message);
+        sb_trace_header(&sync_state.trace,sync_state.trace_status,"",0);
 		if (length && oversized_length(*length))
 			sync_failed("Response exceeds size limit");
 	} else if (event == MG_EV_HTTP_MSG && !sync_state.done) {
 		struct mg_http_message *message = data;
+        sync_state.trace_bytes=message->body.len;
 		if (mg_http_status(message) != 200 || message->body.len > CATALOG_LIMIT) {
 			sync_failed("Upstream catalog is unavailable");
 			return;
@@ -116,6 +124,7 @@ static void sync_event(struct mg_connection *connection, int event, void *data)
 			sync_state.next_due = mg_millis() + REFRESH_MS;
 			fprintf(stderr, "Catalog refresh: %d added or upgraded entries\n", changed);
 		}
+		sb_trace_end(&sync_state.trace,sync_state.trace_status,(unsigned long long)sync_state.trace_bytes,NULL);
 		sync_state.done = 1;
 		connection->is_closing = 1;
 	} else if (event == MG_EV_ERROR && !sync_state.done) {
@@ -136,6 +145,8 @@ static void sync_connect(struct mg_mgr *mgr, int health)
 		proxy = getenv("SB_CATALOG_TEST_PROXY");
 #endif
 	sync_state.health = health;
+    sync_state.trace_status=0;sync_state.trace_bytes=0;
+    sb_trace_begin(&sync_state.trace,"catalog","GET",health ? "http://127.0.0.1:8765/health" : "https://raw.githubusercontent.com/ssbrandsma/SBStandaloneBase/master/config.json",NULL);
 	sync_state.done = 0;
 	sync_state.state = "fetching";
 	sync_state.message = "Checking GitHub releases";

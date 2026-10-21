@@ -85,5 +85,5 @@ int hls_ts_feed(hls_ts *ts, const unsigned char *data, size_t size);
 /* Run one local response with a preconfigured, public-only curl handle.
  * Does not take ownership of curl/fd; no new process/thread or disk writes. */
 void hls_relay(
-	CURL *curl, int fd, const char *url, int head, int expected_codec);
+	CURL *curl, int fd, const char *url, int head, int expected_codec, const char *trace_parent);
 #endif

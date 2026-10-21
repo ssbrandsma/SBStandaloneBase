@@ -7,6 +7,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "image_render.h"
+#include "../../common/http_trace.h"
 #include "auth.h"
 #include "remote.h"
 #include "../../common/public_address.h"
@@ -53,6 +54,7 @@ static struct {
 	unsigned clients_count;
 	int head[WAITER_LIMIT];
 	char key[65], directory[128];
+    char trace_parent[80];
 	unsigned char *data;
 	size_t received;
 	uint64_t deadline;
@@ -201,6 +203,7 @@ typedef struct {
 	size_t remaining, chunk_remaining;
 	int detached, chunked, chunk_end;
 	size_t limit;
+    sb_http_trace trace;
 } Fetch;
 
 /* Consume an HTTP entity into the private job file, keeping only a network
@@ -272,6 +275,15 @@ static void fetch_event(struct mg_connection *c, int event, void *data)
 		c->is_closing = 1;
 	} else if (event == MG_EV_HTTP_HDRS) {
 		struct mg_http_message *m = data;
+        sb_trace_header(&f->trace,mg_http_status(m),"",0);
+        const char *names[]={"Content-Type","Content-Length","Location"};
+        for (unsigned i=0;i<3;i++) {
+            struct mg_str *v=mg_http_get_header(m,names[i]);
+            if (v) {
+                char line[600];int n=snprintf(line,sizeof line,"%s: %.*s",names[i],(int)(v->len>512 ? 512 : v->len),v->buf);
+                sb_trace_header(&f->trace,0,line,(size_t)n);
+            }
+        }
 		struct mg_str *length = mg_http_get_header(m, "Content-Length");
 		if (length && header_size(*length) > (f->stream ? f->limit : SVG_LIMIT)) {
 			f->status = 413;
@@ -329,7 +341,7 @@ static Fetch fetch_once(const char *address,
 			const char *host,
 			const char *path,
 			int public_only,
-			uint64_t deadline, const char *file)
+			uint64_t deadline, const char *file, const char *parent)
 {
 	struct mg_mgr mgr;
 	Fetch f = {0};
@@ -340,6 +352,9 @@ static Fetch fetch_once(const char *address,
 		f.stream=fdopen(fd,"wb");
 		if (!f.stream) { close(fd); f.status=503; return f; }
 	}
+    char trace_url[URL_LIMIT+300];
+    snprintf(trace_url,sizeof trace_url,"http://%s%s",host,path);
+    sb_trace_begin(&f.trace,"image-fetch","GET",trace_url,parent);
 	mg_mgr_init(&mgr);
 	struct mg_connection *c =
 		mg_http_connect(&mgr, address, fetch_event, &f);
@@ -354,10 +369,10 @@ static Fetch fetch_once(const char *address,
 			"User-Agent: StandaloneBaseSVG/1.0 "
 			"(+https://github.com/ssbrandsma/SBStandaloneBase)\r\n"
 			"Accept-Encoding: identity\r\n%sConnection: "
-			"close\r\n\r\n",
+			"close\r\nX-SB-Trace-Id: %s\r\n\r\n",
 			path,
 			host,
-			public_only ? "X-SB-Public-Fetch: 1\r\n" : "");
+			public_only ? "X-SB-Public-Fetch: 1\r\n" : "",f.trace.id);
 	while (!f.done && mg_millis() < deadline)
 		mg_mgr_poll(&mgr, 20);
 	if (!f.done) {
@@ -367,18 +382,20 @@ static Fetch fetch_once(const char *address,
 	mg_mgr_free(&mgr);
 	if (f.stream && fclose(f.stream)) f.status=503;
 	f.stream=NULL;
+    sb_trace_end(&f.trace,(int)f.status,(unsigned long long)f.size,f.status>=400 ? "image HTTP fetch failed" : NULL);
 	return f;
 }
 
 /** Download with per-hop validation and a single overall eight-second deadline.
  */
-static Fetch download(ImageUrl u, const char *file)
+static Fetch download(ImageUrl u, const char *file, const char *parent)
 {
 	uint64_t deadline = mg_millis() + 8000;
 	Fetch f = {0};
 	for (unsigned hop = 0; hop <= 3; hop++) {
 		char ip[INET_ADDRSTRLEN], address[128], path[URL_LIMIT + 16];
 		if (!resolve_public(&u, ip)) {
+            sb_trace_log("event=dns id=%s host=%s error=\"resolution failed or destination rejected\"",parent,u.host);
 			f.status = 403;
 			return f;
 		}
@@ -389,7 +406,7 @@ static Fetch download(ImageUrl u, const char *file)
 			/* Require the opt-in SSRF guard before sending a source
 			 * URL. */
 			f = fetch_once(
-				proxy, "127.0.0.1", "/health", 0, deadline, NULL);
+				proxy, "127.0.0.1", "/health", 0, deadline, NULL,parent);
 			free(f.body);
 			f.body = NULL;
 			if (f.status != 200 || !f.capability) {
@@ -405,7 +422,7 @@ static Fetch download(ImageUrl u, const char *file)
 				return f;
 			}
 			return fetch_once(
-				proxy, "127.0.0.1", path, 1, deadline, file);
+				proxy, "127.0.0.1", path, 1, deadline, file,parent);
 		}
 		unsigned port = 80;
 #ifdef SB_IMAGE_TESTING
@@ -414,7 +431,7 @@ static Fetch download(ImageUrl u, const char *file)
 			port = (unsigned)atoi(getenv("SB_IMAGE_TEST_PORT"));
 #endif
 		snprintf(address, sizeof address, "http://%s:%u", ip, port);
-		f = fetch_once(address, u.host, u.path, 0, deadline, file);
+		f = fetch_once(address, u.host, u.path, 0, deadline, file,parent);
 		if (f.status < 300 || f.status >= 400)
 			return f;
 		if (hop == 3 || !f.location[0]) {
@@ -687,6 +704,11 @@ static void worker(int pipe_fd,
 	size_t png_size = 0;
 	struct stat st;
 	Fetch fetched = {0};
+    sb_http_trace trace;
+    char trace_url[URL_LIMIT+300];
+    if (body) snprintf(trace_url,sizeof trace_url,"local-upload");
+    else snprintf(trace_url,sizeof trace_url,"%s://%s%s",source->https ? "https" : "http",source->host,source->path);
+    sb_trace_begin(&trace,"image-render","RENDER",trace_url,job.trace_parent);
 	int cache = cache_directory(directory, sizeof directory);
 	snprintf(target, sizeof target, "%s/%s.png", directory, job.key);
 	snprintf(input, sizeof input, "%s/input.svg", job.directory);
@@ -707,7 +729,7 @@ static void worker(int pipe_fd,
 		height, IMAGE_LIMIT);
 	if (!body) {
 		fprintf(stderr, "[svg-image] download start\n");
-		fetched = download(*source, input);
+		fetched = download(*source, input,trace.id);
 		if (fetched.status != 200 || !fetched.size) {
 			result.status = fetched.status == 403 ||
 							fetched.status == 413 ||
@@ -746,6 +768,8 @@ static void worker(int pipe_fd,
 		cache_publish(directory, target, png, png_size);
 send:
 	result.size = png ? (unsigned)png_size : 0;
+    sb_trace_log("event=image_result id=%s status=%u cache=%u input_bytes=%zu output_bytes=%u",trace.id,result.status,result.cached,body_size,result.size);
+    sb_trace_end(&trace,(int)result.status,result.size,result.status>=400 ? "image fetch or decode failed" : NULL);
 	if (write_all(pipe_fd, &result, sizeof result) && png)
 		write_all(pipe_fd, png, png_size);
 	if (result.status != 200 || getenv("SB_IMAGE_DIAGNOSTICS"))
@@ -914,6 +938,13 @@ int image_render_handle(struct mg_connection *c, struct mg_http_message *m)
 			image_error(c, 503);
 			return 1;
 		}
+        struct mg_str *trace_parent=mg_http_get_header(m,"X-SB-Trace-Id");
+        job.trace_parent[0]=0;
+        if (trace_parent && trace_parent->len<sizeof job.trace_parent) {
+            size_t n=0;
+            while (n<trace_parent->len && (isalnum((unsigned char)trace_parent->buf[n]) || trace_parent->buf[n]=='-' || trace_parent->buf[n]=='_')) n++;
+            if (n==trace_parent->len) { memcpy(job.trace_parent,trace_parent->buf,n);job.trace_parent[n]=0; }
+        }
 		job.pid = fork();
 		if (!job.pid) {
 			setpgid(0, 0);

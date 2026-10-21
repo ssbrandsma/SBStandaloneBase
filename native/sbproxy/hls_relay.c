@@ -13,6 +13,7 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
+#include "http_trace_curl.h"
 
 typedef struct {
 	CURL *curl;
@@ -30,6 +31,8 @@ typedef struct {
 	char metadata_id[33];
 	hls_id3 *metadata, *ts_metadata;
 	const char *error;
+    const char *trace_parent;
+    sb_http_trace trace;
 } relay;
 
 static pthread_mutex_t hls_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -175,8 +178,10 @@ static size_t header(char *data, size_t size, size_t count, void *opaque)
 	if (n >= 5 && !strncasecmp(data, "HTTP/", 5)) {
 		char *space = memchr(data, ' ', n);
 		r->status = space ? atoi(space + 1) : 0;
+        sb_trace_header(&r->trace,r->status,data,n);
 		r->resume_ok = !r->resume;
 	}
+    sb_trace_header(&r->trace,0,data,n);
 	if (r->resume && n > 14 && !strncasecmp(data, "Content-Range:", 14)) {
 		char text[128];
 		unsigned long long begin, end, total;
@@ -278,6 +283,8 @@ static size_t segment_body(char *data, size_t size, size_t count, void *opaque)
  */
 static CURLcode fetch(relay *r, const char *url, int manifest)
 {
+    sb_trace_begin(&r->trace,manifest ? "hls-manifest" : "hls-segment","GET",url,r->trace_parent);
+    sb_trace_curl(r->curl,&r->trace);
 	r->status = 0;
 	r->bad = 0;
 	r->fetching_manifest = manifest;
@@ -321,7 +328,12 @@ static CURLcode fetch(relay *r, const char *url, int manifest)
 			 (unsigned long long)r->resume);
 	curl_easy_setopt(
 		r->curl, CURLOPT_RANGE, !manifest && r->resume ? range : NULL);
-	return curl_easy_perform(r->curl);
+    CURLcode result=curl_easy_perform(r->curl);
+    double received=0;
+    curl_easy_getinfo(r->curl,CURLINFO_SIZE_DOWNLOAD,&received);
+    sb_trace_end(&r->trace,r->status,(unsigned long long)received,
+        result==CURLE_OK ? (r->bad ? r->error : NULL) : curl_easy_strerror(result));
+    return result;
 }
 
 /** Wait in cancellation-aware 100ms intervals without background polling.
@@ -668,7 +680,7 @@ static void ts_metadata_event(void *opaque, const hls_metadata *event)
 }
 
 void hls_relay(
-	CURL *curl, int fd, const char *url, int head, int expected_codec)
+	CURL *curl, int fd, const char *url, int head, int expected_codec, const char *trace_parent)
 {
 	pthread_mutex_lock(&hls_lock);
 	if (hls_active >= 2) {
@@ -683,6 +695,7 @@ void hls_relay(
 	relay *r = calloc(1, sizeof(*r));
 	if (r) {
 		r->curl = curl;
+        r->trace_parent=trace_parent;
 		r->fd = fd;
 		r->head = head;
 		r->expected_codec = expected_codec;
@@ -792,6 +805,8 @@ void hls_relay(
 		curl_easy_setopt(curl, CURLOPT_HEADERDATA, NULL);
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, NULL);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, NULL);
+        curl_easy_setopt(curl,CURLOPT_VERBOSE,0L);
+        curl_easy_setopt(curl,CURLOPT_DEBUGDATA,NULL);
 		free(r->manifest);
 		if (!r->cancelled && !r->error && !r->head)
 			hls_metadata_finish(r->metadata_session);

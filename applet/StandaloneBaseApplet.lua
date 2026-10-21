@@ -14,6 +14,8 @@ local ServerMigration = require("applets.StandaloneBase.ServerMigration")
 local NetworkAddress = require("applets.StandaloneBase.NetworkAddress")
 local ImageRender = require("applets.StandaloneBase.ImageRender")
 local Artwork = require("applets.StandaloneBase.Artwork")
+local InstallerCompat = require("applets.StandaloneBase.InstallerCompat")
+local HttpTrace = require("applets.StandaloneBase.HttpTrace")
 local io, os, tonumber, tostring = io, os, tonumber, tostring
 local ipairs, pairs, math, pcall, string = ipairs, pairs, math, pcall, string
 local appletManager = appletManager
@@ -167,6 +169,8 @@ function init(self)
     os.execute("chmod 755 "..ROOT.."/svgpngrenderer "..ROOT.."/sb-storage-helper "..ROOT.."/storage-setup.sh "..ROOT.."/storage-boot.sh >/dev/null 2>&1")
     redirectBootstrapServer()
     patchArtworkRouting()
+    HttpTrace.apply()
+    InstallerCompat.apply()
     suppressRetiredCloudServer()
     self.failures={}; self.backoff={}
     launch(SERVICES[1])
@@ -213,7 +217,7 @@ function menu(self)
     for _,s in ipairs(SERVICES) do menu:addItem({text=s.name..": "..(alive(s) and "Running" or "Stopped")}) end
     menu:addItem({text="Extended Storage",callback=function() self:storageMenu() end})
     menu:addItem({text="Web Access",callback=function() if not self.remoteBridge:isInjecting() then self:webAccessMenu() end end})
-	menu:addItem({text="Version: 0.5.6"})
+	menu:addItem({text="Version: 0.5.8"})
     window:addWidget(menu); window:show()
 end
 function webAccessMenu(self)
