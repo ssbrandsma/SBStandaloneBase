@@ -33,11 +33,29 @@ typedef struct {
 	int play, pause, stop, next, previous, seek, volume;
 } np_capabilities;
 
+/* Zero numeric values mean unknown. lossless: 0 unknown, 1 lossy, 2 lossless.
+ */
+typedef struct {
+	char codec[32], bitrate_mode[8];
+	unsigned bitrate_kbps, sample_rate_hz, bit_depth, channels, lossless;
+	int replaygain_known, replaygain_millidb;
+} np_audio;
+
+typedef struct {
+	char id[NP_ID_MAX], name[NP_TEXT_MAX], description[NP_TEXT_MAX];
+	char homepage[NP_ART_MAX], stream_url[NP_ART_MAX], logo[NP_ART_MAX];
+	char country[96], language[96], genre[NP_TEXT_MAX];
+	np_audio audio;
+} np_station;
+
 typedef struct {
 	char id[NP_ID_MAX], title[NP_TEXT_MAX], artist[NP_TEXT_MAX];
 	char album[NP_TEXT_MAX], album_artist[NP_TEXT_MAX],
 		station[NP_TEXT_MAX];
 	char content_type[64], artwork[NP_ART_MAX];
+	char genre[NP_TEXT_MAX], comment[NP_TEXT_MAX], subtitle[NP_TEXT_MAX];
+	char url[NP_ART_MAX], info_link[NP_ART_MAX];
+	np_audio audio, transport;
 	unsigned year, track_number, disc_number;
 } np_track;
 
@@ -52,6 +70,7 @@ typedef struct {
 	np_state state;
 	np_capabilities capabilities;
 	np_track track;
+	np_station station;
 } np_status;
 
 typedef struct {
@@ -72,6 +91,9 @@ int np_demo(np_manager *m);
 int np_demo_next(np_manager *m);
 int np_playerstatus_json(np_manager *m, char *out, size_t cap);
 int np_public_json(np_manager *m, char *out, size_t cap);
+/* Handle an LMS command array inside a Comet message. Returns 1 if handled. */
+int np_lms_query_json(
+	np_manager *m, const char *json, size_t len, char *out, size_t cap);
 
 /* Returns an HTTP status code and writes a JSON response. changed is set when
  * SqueezePlay-visible state changed. */

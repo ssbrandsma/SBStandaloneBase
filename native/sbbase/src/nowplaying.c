@@ -11,6 +11,8 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,6 +39,9 @@ struct np_manager {
 	uint64_t generation_counter, command_counter;
 	np_command queue[NP_COMMANDS_MAX];
 };
+
+static int
+public_metadata_json(const np_status *s, char *out, size_t cap, int length);
 
 /**
  * @brief Handle np monotonic ms.
@@ -379,6 +384,12 @@ static int string_value(const char *j, const jtok *t, char *o, size_t cap)
 				if (i + 4 >= t->end ||
 				    (v = hex4(j + i + 1)) < 0)
 					return 0;
+				if (!v || (v >= 0xd800 && v <= 0xdfff) ||
+				    n + (v < 0x80    ? 1u
+					 : v < 0x800 ? 2u
+						     : 3u) >=
+					    cap)
+					return 0;
 				n = put_utf8(o, cap, n, (unsigned)v);
 				i += 4;
 				continue;
@@ -396,8 +407,9 @@ static int string_value(const char *j, const jtok *t, char *o, size_t cap)
 			else if (c != '"' && c != '\\' && c != '/')
 				return 0;
 		}
-		if (n + 1 < cap)
-			o[n++] = (char)c;
+		if (!c || n + 1 >= cap)
+			return 0;
+		o[n++] = (char)c;
 	}
 	o[n] = 0;
 	return 1;
@@ -550,6 +562,7 @@ int np_public_json(np_manager *m, char *out, size_t cap)
 	char so[192], sn[384], id[384], ti[512], ar[512], al[512], st[512],
 		aw[768];
 	const np_status *s = &m->s;
+	int length;
 	esc(so, sizeof so, s->source);
 	esc(sn, sizeof sn, s->source_name);
 	esc(id, sizeof id, s->track.id);
@@ -558,7 +571,7 @@ int np_public_json(np_manager *m, char *out, size_t cap)
 	esc(al, sizeof al, s->track.album);
 	esc(st, sizeof st, s->track.station);
 	esc(aw, sizeof aw, s->track.artwork);
-	return snprintf(
+	length = snprintf(
 		out,
 		cap,
 		"{\"api_version\":1,\"active\":%s,\"source\":\"%s\",\"name\":"
@@ -581,6 +594,7 @@ int np_public_json(np_manager *m, char *out, size_t cap)
 		al,
 		st,
 		aw);
+	return public_metadata_json(s, out, cap, length);
 }
 
 /**
@@ -593,25 +607,30 @@ int np_public_json(np_manager *m, char *out, size_t cap)
 int np_playerstatus_json(np_manager *m, char *out, size_t cap)
 {
 	const np_status *s = &m->s;
-	char id[384], ti[512], ar[512], al[512], st[512], aw[768], text[1600];
+	char ti[512], ar[512], al[512], st[512], aw[768], text[1600];
 	const char *display_album;
 	uint64_t pos = np_position(m);
-	if (!s->active)
+	int length;
+	if (!s->active || s->state == NP_STOPPED)
 		return snprintf(out,
 				cap,
 				"{\"player_name\":\"Standalone\",\"player_"
 				"connected\":1,\"power\":1,\"mode\":\"stop\","
 				"\"time\":0,\"duration\":0,\"playlist_tracks\":"
-				"0,\"count\":0,\"offset\":0,\"playlist_cur_index\":0,\"mixer "
+				"0,\"count\":0,\"offset\":0,\"playlist_cur_"
+				"index\":0,\"mixer "
 				"volume\":50,\"digital_volume_control\":1,"
 				"\"player_needs_upgrade\":0,\"player_is_"
 				"upgrading\":0,\"seq_no\":0}");
-	esc(id, sizeof id, s->track.id);
 	esc(ti, sizeof ti, s->track.title);
 	esc(ar, sizeof ar, s->track.artist);
 	esc(al, sizeof al, s->track.album);
-	esc(st, sizeof st, s->track.station);
-	esc(aw, sizeof aw, s->track.artwork);
+	esc(st,
+	    sizeof st,
+	    s->station.name[0] ? s->station.name : s->track.station);
+	esc(aw,
+	    sizeof aw,
+	    s->track.artwork[0] ? s->track.artwork : s->station.logo);
 	display_album = s->live && !al[0] ? st : al;
 	snprintf(text,
 		 sizeof text,
@@ -620,35 +639,47 @@ int np_playerstatus_json(np_manager *m, char *out, size_t cap)
 		 ar,
 		 ar[0] && display_album[0] ? " - " : "",
 		 display_album);
-	return snprintf(
+	length = snprintf(
 		out,
 		cap,
 		"{\"player_name\":\"Standalone\",\"player_connected\":1,"
 		"\"power\":1,\"mode\":\"%s\",\"rate\":%d,\"time\":%.3f,"
-		"\"duration\":%.3f,\"playlist_tracks\":1,\"count\":1,\"offset\":0,\"playlist_cur_"
+		"\"duration\":%.3f,\"playlist_tracks\":1,\"count\":1,"
+		"\"offset\":0,\"playlist_cur_"
 		"index\":0,\"playlist_timestamp\":%llu,\"playlist "
 		"repeat\":0,\"playlist "
 		"shuffle\":0,\"remote\":%d,\"current_title\":\"%s\",\"mixer "
 		"volume\":50,\"digital_volume_control\":1,\"use_volume_"
 		"control\":1,\"player_needs_upgrade\":0,\"player_is_"
 		"upgrading\":0,\"seq_no\":0,\"item_loop\":[{\"text\":\"%s\","
-		"\"track\":\"%s\",\"artist\":\"%s\",\"album\":\"%s\","
-		"\"duration\":%.3f,\"icon\":\"%s\",\"params\":{\"track_id\":\"%"
-		"s\"}}]}",
+		"\"id\":-1,\"track\":\"%s\",\"artist\":\"%s\",\"album\":\"%s\","
+		"\"duration\":%.3f,\"icon\":\"%s\",\"params\":{\"track_id\":-1,"
+		"\"playlist_index\":0}}],\"base\":{\"actions\":{\"more\":{"
+		"\"cmd\":[\"contextmenu\"],\"itemsParams\":\"params\","
+		"\"params\":{"
+		"\"menu\":\"track\",\"context\":\"playlist\"},\"window\":{"
+		"\"isContextMenu\":1}}}}}",
 		lms_mode(s->state),
 		s->state == NP_PLAYING ? 1 : 0,
 		(double)pos / 1000.0,
 		s->duration_known ? (double)s->duration_ms / 1000.0 : 0.0,
 		(unsigned long long)s->playlist_revision,
-		s->live ? 1 : 0,
+		strcmp(s->source, "demo") ? 1 : 0,
 		s->live && st[0] ? st : ti,
 		text,
 		ti,
 		ar,
 		display_album,
 		s->duration_known ? (double)s->duration_ms / 1000.0 : 0.0,
-		aw,
-		id);
+		aw);
+	if (length < 0 || (size_t)length >= cap) {
+		snprintf(out,
+			 cap,
+			 "{\"count\":0,\"offset\":0,\"item_loop\":[],\"error\":"
+			 "\"status_too_large\"}");
+		return -1;
+	}
+	return length;
 }
 
 /**
@@ -726,6 +757,139 @@ getnum(const char *j, jtok *t, int n, int obj, const char *k, uint64_t *d)
 static int has_member(const char *j, jtok *t, int n, int obj, const char *k)
 {
 	return member(j, t, n, obj, k) >= 0;
+}
+
+/** Read a bounded optional unsigned metadata value; zero means unknown. */
+static int metadata_uint(const char *j,
+			 jtok *t,
+			 int n,
+			 int obj,
+			 const char *key,
+			 unsigned *out,
+			 unsigned maximum)
+{
+	uint64_t value = *out;
+	if (!getnum(j, t, n, obj, key, &value) || value > maximum)
+		return 0;
+	*out = (unsigned)value;
+	return 1;
+}
+
+/** Parse an optional audio object atomically; explicit null clears it. */
+static int audio_read(const char *j,
+		      jtok *t,
+		      int n,
+		      int parent,
+		      const char *key,
+		      np_audio *audio)
+{
+	int obj = member(j, t, n, parent, key), x, value;
+	char gain[48], *end;
+	double db;
+	if (obj < 0)
+		return 1;
+	/* A supplied audio object is a quality snapshot, not a partial merge.
+	 */
+	memset(audio, 0, sizeof *audio);
+	if (t[obj].type == J_PRIMITIVE && t[obj].end - t[obj].start == 4 &&
+	    !memcmp(j + t[obj].start, "null", 4)) {
+		memset(audio, 0, sizeof *audio);
+		return 1;
+	}
+	if (t[obj].type != J_OBJECT ||
+	    !getstr(j,
+		    t,
+		    n,
+		    obj,
+		    "codec",
+		    audio->codec,
+		    sizeof audio->codec,
+		    0) ||
+	    !getstr(j,
+		    t,
+		    n,
+		    obj,
+		    "bitrate_mode",
+		    audio->bitrate_mode,
+		    sizeof audio->bitrate_mode,
+		    0) ||
+	    !metadata_uint(j,
+			   t,
+			   n,
+			   obj,
+			   "bitrate_kbps",
+			   &audio->bitrate_kbps,
+			   100000) ||
+	    !metadata_uint(j,
+			   t,
+			   n,
+			   obj,
+			   "sample_rate_hz",
+			   &audio->sample_rate_hz,
+			   768000) ||
+	    !metadata_uint(j, t, n, obj, "bit_depth", &audio->bit_depth, 64) ||
+	    !metadata_uint(j, t, n, obj, "channels", &audio->channels, 32))
+		return 0;
+	if (audio->bitrate_mode[0] && strcmp(audio->bitrate_mode, "CBR") &&
+	    strcmp(audio->bitrate_mode, "VBR"))
+		return 0;
+	x = member(j, t, n, obj, "lossless");
+	if (x >= 0) {
+		if (!boolean(j, &t[x], &value))
+			return 0;
+		audio->lossless = value ? 2 : 1;
+	}
+	x = member(j, t, n, obj, "replaygain_db");
+	if (x >= 0) {
+		int length = t[x].end - t[x].start;
+		if (t[x].type != J_PRIMITIVE || length <= 0 ||
+		    (size_t)length >= sizeof gain)
+			return 0;
+		memcpy(gain, j + t[x].start, (size_t)length);
+		gain[length] = 0;
+		db = strtod(gain, &end);
+		if (*end || !isfinite(db) || db < -100 || db > 100)
+			return 0;
+		audio->replaygain_known = 1;
+		audio->replaygain_millidb = (int)(db * 1000);
+	}
+	return 1;
+}
+
+/** Read station attributes separately from track attributes; each object is a
+ * snapshot. */
+static int station_read(const char *j, jtok *t, int n, np_station *station)
+{
+	int obj = member(j, t, n, 0, "station");
+	if (obj < 0)
+		return 1;
+	memset(station, 0, sizeof *station);
+	if (t[obj].type == J_PRIMITIVE && t[obj].end - t[obj].start == 4 &&
+	    !memcmp(j + t[obj].start, "null", 4))
+		return 1;
+	if (t[obj].type != J_OBJECT)
+		return 0;
+#define STATION_STRING(key, field)                                             \
+	if (!getstr(j,                                                         \
+		    t,                                                         \
+		    n,                                                         \
+		    obj,                                                       \
+		    key,                                                       \
+		    station->field,                                            \
+		    sizeof station->field,                                     \
+		    0))                                                        \
+	return 0
+	STATION_STRING("id", id);
+	STATION_STRING("name", name);
+	STATION_STRING("description", description);
+	STATION_STRING("homepage", homepage);
+	STATION_STRING("stream_url", stream_url);
+	STATION_STRING("logo", logo);
+	STATION_STRING("country", country);
+	STATION_STRING("language", language);
+	STATION_STRING("genre", genre);
+#undef STATION_STRING
+	return audio_read(j, t, n, obj, "audio", &station->audio);
 }
 
 /**
@@ -998,6 +1162,19 @@ int np_api(np_manager *m,
 				return 400;
 			}
 		}
+		if (!station_read(body, t, n, &candidate.station)) {
+			error_json(out, cap, "invalid_station");
+			return 400;
+		}
+		if ((m->s.station.id[0] && candidate.station.id[0] &&
+		     strcmp(m->s.station.id, candidate.station.id)) ||
+		    (!m->s.station.id[0] && m->s.station.name[0] &&
+		     candidate.station.name[0] &&
+		     strcmp(m->s.station.name, candidate.station.name))) {
+			memset(&candidate.track, 0, sizeof candidate.track);
+			dur = pos = 0;
+			flags |= NP_CHANGE_IDENTITY;
+		}
 		tr = member(body, t, n, 0, "track");
 		if (tr >= 0) {
 			if (t[tr].type != J_OBJECT) {
@@ -1020,6 +1197,9 @@ int np_api(np_manager *m,
 					memset(&candidate.track,
 					       0,
 					       sizeof candidate.track);
+					memset(&candidate.station,
+					       0,
+					       sizeof candidate.station);
 					dur = 0;
 				}
 				snprintf(candidate.track.id,
@@ -1087,6 +1267,69 @@ int np_api(np_manager *m,
 				error_json(out, cap, "invalid_track");
 				return 400;
 			}
+			if (!audio_read(body,
+					t,
+					n,
+					tr,
+					"audio",
+					&candidate.track.audio) ||
+			    !audio_read(body,
+					t,
+					n,
+					tr,
+					"transport",
+					&candidate.track.transport) ||
+			    !metadata_uint(body,
+					   t,
+					   n,
+					   tr,
+					   "year",
+					   &candidate.track.year,
+					   9999) ||
+			    !metadata_uint(body,
+					   t,
+					   n,
+					   tr,
+					   "track_number",
+					   &candidate.track.track_number,
+					   100000) ||
+			    !metadata_uint(body,
+					   t,
+					   n,
+					   tr,
+					   "disc_number",
+					   &candidate.track.disc_number,
+					   10000)) {
+				error_json(out, cap, "invalid_audio");
+				return 400;
+			}
+#define TRACK_STRING(key, field)                                               \
+	if (!getstr(body,                                                      \
+		    t,                                                         \
+		    n,                                                         \
+		    tr,                                                        \
+		    key,                                                       \
+		    candidate.track.field,                                     \
+		    sizeof candidate.track.field,                              \
+		    0)) {                                                      \
+		error_json(out, cap, "invalid_track");                         \
+		return 400;                                                    \
+	}
+			TRACK_STRING("genre", genre);
+			TRACK_STRING("comment", comment);
+			TRACK_STRING("subtitle", subtitle);
+			TRACK_STRING("url", url);
+			TRACK_STRING("info_link", info_link);
+#undef TRACK_STRING
+		}
+		if (!station_read(body, t, n, &candidate.station)) {
+			error_json(out, cap, "invalid_station");
+			return 400;
+		}
+		if (candidate.state == NP_STOPPED) {
+			memset(&candidate.track, 0, sizeof candidate.track);
+			memset(&candidate.station, 0, sizeof candidate.station);
+			dur = pos = 0;
 		}
 		candidate.live = live;
 		candidate.position_ms = pos;
@@ -1099,7 +1342,10 @@ int np_api(np_manager *m,
 		    candidate.duration_ms != m->s.duration_ms ||
 		    candidate.duration_known != m->s.duration_known)
 			flags |= NP_CHANGE_PLAYBACK;
-		if (!track_equal(&candidate.track, &m->s.track))
+		if (!track_equal(&candidate.track, &m->s.track) ||
+		    memcmp(&candidate.station,
+			   &m->s.station,
+			   sizeof candidate.station))
 			flags |= NP_CHANGE_METADATA;
 		if (strcmp(candidate.track.id, m->s.track.id))
 			flags |= NP_CHANGE_IDENTITY;
@@ -1229,5 +1475,561 @@ int np_demo_next(np_manager *m)
 	m->s.position_ms = 0;
 	m->s.position_clock_ms = np_monotonic_ms();
 	m->s.playlist_revision++;
+	return 1;
+}
+
+/* LMS serializers share one bounded writer. A short buffer produces an error
+ * object, never a truncated JSON document or an out-of-bounds append. */
+typedef struct {
+	char *out;
+	size_t cap, used;
+	int failed;
+} np_writer;
+
+typedef struct {
+	const char *key, *label, *value;
+	char number[48];
+	int numeric;
+} np_field;
+
+/** Append formatted JSON to writer w; retain failure once capacity is exceeded.
+ */
+static void write_json(np_writer *w, const char *format, ...)
+{
+	va_list args;
+	int length;
+	if (w->failed)
+		return;
+	va_start(args, format);
+	length = vsnprintf(w->out + w->used, w->cap - w->used, format, args);
+	va_end(args);
+	if (length < 0 || (size_t)length >= w->cap - w->used)
+		w->failed = 1;
+	else
+		w->used += (size_t)length;
+}
+
+/** Append an already safe string span, leaving room for the terminating NUL. */
+static void write_bytes(np_writer *w, const unsigned char *bytes, size_t length)
+{
+	if (w->failed)
+		return;
+	if (length >= w->cap - w->used) {
+		w->failed = 1;
+		return;
+	}
+	memcpy(w->out + w->used, bytes, length);
+	w->used += length;
+	w->out[w->used] = 0;
+}
+
+/** Escape string contents in spans, avoiding a printf call for every byte. */
+static void write_string_content(np_writer *w, const char *value)
+{
+	const unsigned char *p = (const unsigned char *)value;
+	while (*p && !w->failed) {
+		const unsigned char *start = p;
+		while (*p >= 32 && *p != '"' && *p != '\\')
+			p++;
+		write_bytes(w, start, (size_t)(p - start));
+		if (!*p || w->failed)
+			break;
+		if (*p == '"' || *p == '\\')
+			write_json(w, "\\%c", *p);
+		else
+			write_json(w, "\\u%04x", *p);
+		p++;
+	}
+}
+
+/** Write one JSON UTF-8 string, including its opening and closing quotes. */
+static void write_string(np_writer *w, const char *value)
+{
+	write_json(w, "\"");
+	write_string_content(w, value);
+	write_json(w, "\"");
+}
+
+/** Add a known string field, skipping empty/unknown metadata. */
+static void field_string(np_field *f,
+			 int *count,
+			 const char *key,
+			 const char *label,
+			 const char *value)
+{
+	if (!value || !value[0])
+		return;
+	f[*count].key = key;
+	f[*count].label = label;
+	f[*count].value = value;
+	f[*count].numeric = 0;
+	(*count)++;
+}
+
+/** Add a normalized numeric field; decimal precision is selected by its caller.
+ */
+static void field_number(np_field *f,
+			 int *count,
+			 const char *key,
+			 const char *label,
+			 double value,
+			 int decimals)
+{
+	np_field *field = &f[*count];
+	field->key = key;
+	field->label = label;
+	snprintf(field->number, sizeof field->number, "%.*f", decimals, value);
+	field->value = field->number;
+	field->numeric = 1;
+	(*count)++;
+}
+
+/** Select source metadata using Queries.pm's standard track tag map. */
+static int collect_fields(const np_status *s, const char *tags, np_field *f)
+{
+	const np_track *t = &s->track;
+	const np_audio *a = &t->audio;
+	const char *station = s->station.name[0] ? s->station.name : t->station;
+	int count = 0;
+	const char *p;
+	field_number(f, &count, "id", NULL, -1, 0);
+	field_string(f, &count, "title", "Title", t->title);
+	for (p = tags; *p; p++) {
+		if (memchr(tags, *p, (size_t)(p - tags)))
+			continue;
+		switch (*p) {
+#define STRING_TAG(tag, key, label, value)                                     \
+	case tag:                                                              \
+		field_string(f, &count, key, label, value);                    \
+		break
+#define NUMBER_TAG(tag, key, label, value)                                     \
+	case tag:                                                              \
+		if (value)                                                     \
+			field_number(f, &count, key, label, value, 0);         \
+		break
+			STRING_TAG('a', "artist", "Artist", t->artist);
+		case 'A':
+			if (!strchr(tags, 'a'))
+				field_string(f,
+					     &count,
+					     "artist",
+					     "Artist",
+					     t->artist);
+			break;
+			STRING_TAG('l', "album", "Album", t->album);
+			STRING_TAG('g',
+				   "genre",
+				   "Genre",
+				   t->genre[0] ? t->genre : s->station.genre);
+			STRING_TAG('k', "comment", "Comment", t->comment);
+			STRING_TAG('z', "subtitle", "Subtitle", t->subtitle);
+			STRING_TAG('o',
+				   "type",
+				   "Type",
+				   a->codec[0] ? a->codec : t->content_type);
+			STRING_TAG('u',
+				   "url",
+				   "URL",
+				   t->url[0] ? t->url : s->station.stream_url);
+			STRING_TAG('K',
+				   "artwork_url",
+				   NULL,
+				   t->artwork[0] ? t->artwork
+						 : s->station.logo);
+			STRING_TAG('N', "remote_title", "Station", station);
+			STRING_TAG('L',
+				   "info_link",
+				   "Information",
+				   t->info_link[0] ? t->info_link
+						   : s->station.homepage);
+			NUMBER_TAG('y', "year", "Year", t->year);
+			NUMBER_TAG('t', "tracknum", "Track", t->track_number);
+			NUMBER_TAG('i', "disc", "Disc", t->disc_number);
+			NUMBER_TAG('T',
+				   "samplerate",
+				   "Sample rate (Hz)",
+				   a->sample_rate_hz);
+			NUMBER_TAG('I',
+				   "samplesize",
+				   "Sample size (bits)",
+				   a->bit_depth);
+			NUMBER_TAG('H', "channels", "Channels", a->channels);
+		case 'r':
+			if (a->bitrate_kbps) {
+				np_field *field = &f[count];
+				snprintf(field->number,
+					 sizeof field->number,
+					 "%ukbps%s%s",
+					 a->bitrate_kbps,
+					 a->bitrate_mode[0] ? " " : "",
+					 a->bitrate_mode);
+				field_string(f,
+					     &count,
+					     "bitrate",
+					     "Bitrate",
+					     field->number);
+			}
+			break;
+		case 'Q':
+			if (a->lossless)
+				field_number(f,
+					     &count,
+					     "lossless",
+					     "Lossless",
+					     a->lossless == 2,
+					     0);
+			break;
+		case 'Y':
+			if (a->replaygain_known)
+				field_number(f,
+					     &count,
+					     "replay_gain",
+					     "ReplayGain (dB)",
+					     a->replaygain_millidb / 1000.0,
+					     3);
+			break;
+		case 'x':
+			field_number(f, &count, "remote", NULL, 1, 0);
+			break;
+		case 'd':
+			if (s->duration_known)
+				field_number(f,
+					     &count,
+					     "duration",
+					     "Duration (seconds)",
+					     s->duration_ms / 1000.0,
+					     3);
+			break;
+#undef STRING_TAG
+#undef NUMBER_TAG
+		default:
+			break;
+		}
+	}
+	return count;
+}
+
+/** Emit one track/songinfo metadata field, preserving JSON numeric value types.
+ */
+static void write_field(np_writer *w, const np_field *field)
+{
+	write_string(w, field->key);
+	write_json(w, ":");
+	if (field->numeric)
+		write_json(w, "%s", field->value);
+	else
+		write_string(w, field->value);
+}
+
+/** Append optional normalized audio to the internal status response. */
+static void write_audio(np_writer *w, const char *key, const np_audio *a)
+{
+	int separator = 0;
+	if (!a->codec[0] && !a->bitrate_kbps && !a->sample_rate_hz &&
+	    !a->bit_depth && !a->channels && !a->lossless &&
+	    !a->replaygain_known)
+		return;
+	write_json(w, ",\"%s\":{", key);
+#define AUDIO_STRING(name, value)                                              \
+	if (value[0]) {                                                        \
+		write_json(w, "%s\"%s\":", separator++ ? "," : "", name);      \
+		write_string(w, value);                                        \
+	}
+#define AUDIO_NUMBER(name, value)                                              \
+	if (value)                                                             \
+	write_json(w, "%s\"%s\":%u", separator++ ? "," : "", name, value)
+	AUDIO_STRING("codec", a->codec);
+	AUDIO_STRING("bitrate_mode", a->bitrate_mode);
+	AUDIO_NUMBER("bitrate_kbps", a->bitrate_kbps);
+	AUDIO_NUMBER("sample_rate_hz", a->sample_rate_hz);
+	AUDIO_NUMBER("bit_depth", a->bit_depth);
+	AUDIO_NUMBER("channels", a->channels);
+#undef AUDIO_STRING
+#undef AUDIO_NUMBER
+	if (a->lossless)
+		write_json(w,
+			   "%s\"lossless\":%s",
+			   separator++ ? "," : "",
+			   a->lossless == 2 ? "true" : "false");
+	if (a->replaygain_known)
+		write_json(w,
+			   "%s\"replaygain_db\":%.3f",
+			   separator ? "," : "",
+			   a->replaygain_millidb / 1000.0);
+	write_json(w, "}");
+}
+
+/** Extend the existing internal status without exposing owner credentials.
+ * s is the current snapshot; out/cap contain the legacy response of length.
+ * Returns its completed length, or -1 with a JSON error on capacity failure.
+ */
+static int
+public_metadata_json(const np_status *s, char *out, size_t cap, int length)
+{
+	np_writer w = {out, cap, 0, 0};
+	if (length < 2 || (size_t)length >= cap)
+		goto overflow;
+	w.used = (size_t)length - 2;
+	write_audio(&w, "audio", &s->track.audio);
+	write_audio(&w, "transport", &s->track.transport);
+#define PUBLIC_TRACK(key, field)                                               \
+	if (s->track.field[0]) {                                               \
+		write_json(&w, ",\"%s\":", key);                               \
+		write_string(&w, s->track.field);                              \
+	}
+	PUBLIC_TRACK("genre", genre);
+	PUBLIC_TRACK("comment", comment);
+	PUBLIC_TRACK("subtitle", subtitle);
+	PUBLIC_TRACK("url", url);
+	PUBLIC_TRACK("info_link", info_link);
+#undef PUBLIC_TRACK
+	if (s->track.year)
+		write_json(&w, ",\"year\":%u", s->track.year);
+	if (s->track.track_number)
+		write_json(&w, ",\"track_number\":%u", s->track.track_number);
+	if (s->track.disc_number)
+		write_json(&w, ",\"disc_number\":%u", s->track.disc_number);
+	write_json(&w, "},\"station\":{\"name\":");
+	write_string(&w, s->station.name);
+#define PUBLIC_STATION(key, field)                                             \
+	if (s->station.field[0]) {                                             \
+		write_json(&w, ",\"%s\":", key);                               \
+		write_string(&w, s->station.field);                            \
+	}
+	PUBLIC_STATION("id", id);
+	PUBLIC_STATION("description", description);
+	PUBLIC_STATION("homepage", homepage);
+	PUBLIC_STATION("country", country);
+	PUBLIC_STATION("language", language);
+	PUBLIC_STATION("genre", genre);
+	PUBLIC_STATION("logo", logo);
+	PUBLIC_STATION("stream_url", stream_url);
+#undef PUBLIC_STATION
+	write_audio(&w, "audio", &s->station.audio);
+	write_json(&w, "}}");
+	if (!w.failed)
+		return (int)w.used;
+overflow:
+	snprintf(out, cap, "{\"error\":\"metadata_response_too_large\"}");
+	return -1;
+}
+
+/** Parse current-track LMS queries from a Comet message using bounded JSON
+ * tokens. m owns the snapshot; json/len delimit one message; out/cap receive
+ * valid JSON. Returns zero for other commands, one for handled queries
+ * (including errors).
+ */
+int np_lms_query_json(
+	np_manager *m, const char *json, size_t len, char *out, size_t cap)
+{
+	jtok tokens[JTOKENS];
+	np_field fields[40];
+	np_writer w = {out, cap, 0, 0};
+	char command[32] = "", tags[96] = "", arg[NP_ART_MAX];
+	const np_status *s = &m->s;
+	int n, data, request, args, i, ordinal = 0, menu = 0, selected = 1;
+	int index = 0, quantity = 100, count, last, songinfo, info;
+	int has_tags = 0, selector_seen = 0;
+	if (len > 16384 || !cap)
+		return 0;
+	n = parse_json(json, len, tokens, JTOKENS);
+	if (n < 0)
+		return 0;
+	data = member(json, tokens, n, 0, "data");
+	request = member(json, tokens, n, data, "request");
+	if (request < 0 || tokens[request].type != J_ARRAY)
+		return 0;
+	i = request + 1;
+	if (i >= n)
+		return 0;
+	args = subtree(tokens, n, i);
+	if (args >= n || tokens[args].type != J_ARRAY || args + 1 >= n ||
+	    !string_value(json, &tokens[args + 1], command, sizeof command))
+		return 0;
+	songinfo = !strcmp(command, "songinfo");
+	info = !strcmp(command, "contextmenu") || !strcmp(command, "trackinfo");
+	if (strcmp(command, "status") && !songinfo && !info)
+		return 0;
+	for (i = args + 2; i < n && tokens[i].start < tokens[args].end; i++) {
+		if (tokens[i].type == J_STRING) {
+			if (!string_value(json, &tokens[i], arg, sizeof arg))
+				goto invalid;
+		} else if (tokens[i].type == J_PRIMITIVE &&
+			   tokens[i].end - tokens[i].start < (int)sizeof arg) {
+			memcpy(arg,
+			       json + tokens[i].start,
+			       (size_t)(tokens[i].end - tokens[i].start));
+			arg[tokens[i].end - tokens[i].start] = 0;
+		} else
+			goto invalid;
+		if (!strncmp(arg, "tags:", 5)) {
+			if (strlen(arg + 5) >= sizeof tags)
+				goto invalid;
+			strcpy(tags, arg + 5);
+			has_tags = 1;
+		} else if (!strncmp(arg, "menu:", 5))
+			menu = 1;
+		else if (!strncmp(arg, "track_id:", 9)) {
+			selector_seen = 1;
+			selected = !strcmp(arg + 9, "-1") ||
+				   !strcmp(arg + 9, s->track.id);
+		} else if (!strncmp(arg, "url:", 4)) {
+			selector_seen = 1;
+			selected = !strcmp(arg + 4, s->track.url) ||
+				   !strcmp(arg + 4, s->station.stream_url);
+		} else if (!strncmp(arg, "playlist_index:", 15))
+			selected = !strcmp(arg + 15, "0");
+		else if (!strchr(arg, ':') && strcmp(arg, "items")) {
+			char *end;
+			long value =
+				!strcmp(arg, "-") ? 0 : strtol(arg, &end, 10);
+			if (strcmp(arg, "-") &&
+			    (*end || value < 0 || value > 1000000))
+				goto invalid;
+			if (!ordinal++)
+				index = (int)value;
+			else
+				quantity = (int)value;
+		}
+	}
+	if (menu && !info && !songinfo) {
+		if (np_playerstatus_json(m, out, cap) < 0)
+			goto invalid;
+		return 1;
+	}
+	if (!has_tags)
+		strcpy(tags,
+		       info	  ? "aAlgrytiodrTIHQYxuKNLzk"
+		       : songinfo ? "abcdefghijJklmnopqrstvwxyzBCDEFHIJKLMNOQRT"
+				    "UVWXY"
+				  : "gald");
+	if (songinfo && !selector_seen)
+		goto invalid;
+	count = s->active && s->state != NP_STOPPED && selected
+			? collect_fields(s, tags, fields)
+			: 0;
+	if (info) {
+		int total = 0, item = 0;
+		/* These are standard XMLBrowser text rows, not invented track
+		 * tags. */
+		if (count) {
+			field_string(fields,
+				     &count,
+				     "description",
+				     "Station description",
+				     s->station.description);
+			field_string(fields,
+				     &count,
+				     "country",
+				     "Country",
+				     s->station.country);
+			field_string(fields,
+				     &count,
+				     "language",
+				     "Language",
+				     s->station.language);
+			field_string(fields,
+				     &count,
+				     "station_codec",
+				     "Station format (declared)",
+				     s->station.audio.codec);
+			if (s->station.audio.bitrate_kbps)
+				field_number(fields,
+					     &count,
+					     "station_bitrate",
+					     "Station bitrate (declared, kbps)",
+					     s->station.audio.bitrate_kbps,
+					     0);
+		}
+		for (i = 0; i < count; i++)
+			if (fields[i].label)
+				total++;
+		write_json(&w,
+			   "{\"count\":%d,\"offset\":%d,\"window\":{\"text\":"
+			   "\"More Info\"},\"item_loop\":[",
+			   total,
+			   index < total ? index : total);
+		for (i = 0; i < count; i++) {
+			if (!fields[i].label)
+				continue;
+			if (item >= index && item - index < quantity) {
+				if (item > index)
+					write_json(&w, ",");
+				write_json(&w,
+					   "{\"type\":\"text\",\"style\":"
+					   "\"itemNoAction\",\"action\":"
+					   "\"none\",\"text\":");
+				write_json(&w, "\"");
+				write_string_content(&w, fields[i].label);
+				write_json(&w, ": ");
+				write_string_content(&w, fields[i].value);
+				write_json(&w, "\"}");
+			}
+			item++;
+		}
+		write_json(&w, "]}");
+	} else if (songinfo) {
+		if (index > count)
+			index = count;
+		last = quantity > count - index ? count : index + quantity;
+		write_json(&w, "{\"songinfo_loop\":[");
+		for (i = index; i < last; i++) {
+			write_json(&w, "%s{", i > index ? "," : "");
+			write_field(&w, &fields[i]);
+			write_json(&w, "}");
+		}
+		write_json(&w, "]}");
+	} else {
+		write_json(&w,
+			   "{\"player_name\":\"Standalone\",\"player_"
+			   "connected\":1,\"power\":1,"
+			   "\"mode\":\"%s\",\"time\":%.3f,\"duration\":%.3f,"
+			   "\"playlist_tracks\":%d,"
+			   "\"playlist_cur_index\":0,\"count\":%d,\"offset\":0,"
+			   "\"remote\":1,\"current_title\":",
+			   lms_mode(s->state),
+			   np_position(m) / 1000.0,
+			   s->duration_known ? s->duration_ms / 1000.0 : 0,
+			   count ? 1 : 0,
+			   count ? 1 : 0);
+		write_string(&w,
+			     s->station.name[0]		      ? s->station.name
+			     : s->live && s->track.station[0] ? s->track.station
+							      : s->track.title);
+		{
+			const np_audio *a = &s->track.transport;
+			if (strchr(tags, 'o') && a->codec[0]) {
+				write_json(&w, ",\"type\":");
+				write_string(&w, a->codec);
+			}
+			if (strchr(tags, 'b') && a->bitrate_kbps)
+				write_json(&w,
+					   ",\"bitrate\":\"%ukbps\"",
+					   a->bitrate_kbps);
+			if (strchr(tags, 'T') && a->sample_rate_hz)
+				write_json(&w,
+					   ",\"samplerate\":%u",
+					   a->sample_rate_hz);
+			if (strchr(tags, 'I') && a->bit_depth)
+				write_json(
+					&w, ",\"samplesize\":%u", a->bit_depth);
+		}
+		write_json(&w, ",\"playlist_loop\":[");
+		if (count && index == 0 && quantity) {
+			write_json(&w, "{\"playlist index\":0");
+			for (i = 0; i < count; i++) {
+				write_json(&w, ",");
+				write_field(&w, &fields[i]);
+			}
+			write_json(&w, "}");
+		}
+		write_json(&w, "]}");
+	}
+	if (!w.failed)
+		return 1;
+invalid:
+	snprintf(out,
+		 cap,
+		 "{\"error\":\"invalid_or_oversized_metadata_query\"}");
 	return 1;
 }

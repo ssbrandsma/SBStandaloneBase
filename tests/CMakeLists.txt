@@ -70,6 +70,10 @@ if(NOT WIN32)
 endif()
 if(NOT WIN32)
   find_package(Python3 COMPONENTS Interpreter)
+  if(Python3_FOUND AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_CROSSCOMPILING)
+    add_test(NAME nowplaying_metadata COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/nowplaying/test_metadata.py)
+  endif()
   if(Python3_Interpreter_FOUND)
     add_test(NAME storage_firmware_recovery COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/storage/test_firmware_recovery.py

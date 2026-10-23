@@ -112,3 +112,55 @@ local sink=managed:_zipSink(active.."/StandaloneRadio/")
 sink({filename="images/"});sink({filename="images/radio.png"});sink("image");sink(nil)
 assert(managed.fetched and bytes[active.."/StandaloneRadio/images/radio.png"]=="image")
 print("managed AppletManager load and instance patch lifecycle tests passed")
+
+-- Jive frees an applet when its menu closes, then reloads its module and
+-- constructs another object next time. Verify the permanent manager hook.
+local current
+local other={}
+local reloads=0
+local reloader={loadApplet=function(_,name)
+    if name~="SetupAppletInstaller" then return other end
+    if not current then
+        reloads=reloads+1
+        local class={appletInstallerMenu=function(self) self.appletdir="/mnt/storage/usr/share/jive/applets" end,
+            _download=function() end,_remove=function() end,
+            _zipSink=function() error("unpatched stock sink after reload") end}
+        current=setmetatable({}, {__index=class})
+    end
+    return current
+end}
+assert(compat.apply(nil,{appletManager=reloader,fs=fs,io=files}))
+local loader=reloader.loadApplet
+for i=1,3 do
+    current=nil -- AppletManager.freeApplet clears both the class and instance.
+    local nextInstance=reloader:loadApplet("SetupAppletInstaller")
+    nextInstance:appletInstallerMenu()
+    assert(nextInstance.appletdir==active)
+    local nextSink=nextInstance:_zipSink(active.."/StandaloneRadio/")
+    nextSink({filename="images/"});nextSink({filename="images/radio.png"});nextSink("reopened");nextSink(nil)
+    assert(nextInstance.fetched)
+end
+assert(reloads==4 and reloader:loadApplet("OtherApplet")==other)
+assert(compat.apply(nil,{appletManager=reloader,fs=fs,io=files}) and reloader.loadApplet==loader)
+print("installer close/free/reload/reopen lifecycle tests passed")
+
+local shown,finished,stored=false,false,false
+local broken={appletInstallerMenu=function() end,_remove=function() end,
+    _zipSink=function() end,_finished=function() finished=true;stored=true end,
+    _download=function(self)
+        local sink=self:_zipSink(active.."/Broken/")
+        assert(not pcall(sink,{filename="../escape"}))
+        assert(self.fetched,"failed extraction must wake the download task")
+        assert(sink("late chunk")==nil)
+    end}
+assert(compat.apply(broken,{fs=fs,io=files,showError=function(message) shown=message end}))
+broken.todownload={Broken={}}
+broken:_download();broken:_finished()
+assert(shown and not finished and not stored)
+local checksum={appletInstallerMenu=function() end,_remove=function() end,_zipSink=function() end,
+    _finished=function() error("incomplete download must not record success") end,
+    _download=function() end}
+assert(compat.apply(checksum,{fs=fs,io=files,showError=function(message) shown=message end}))
+checksum.todownload={Broken={}};checksum:_download();checksum:_finished()
+assert(shown:find("verification did not complete",1,true))
+print("extraction errors wake the task, stop the spinner and prevent false installation bookkeeping")

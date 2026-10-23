@@ -48,6 +48,38 @@ try:
     assert current["state"] == "playing" and current["position_ms"] >= 1300
     assert current["track"]["title"] == "Beyoncé – Déjà Vu"
 
+    # The real Comet dispatcher must reach the metadata commands before the
+    # generic menu fallback (contextmenu requests contain menu:track).
+    assert request("POST", "/api/nowplaying/update", {
+        "session_id": token,
+        "track": {"url": "http://example.org/serverstatus/jiveapplets",
+                  "audio": {"codec": "flc", "sample_rate_hz": 96000,
+                             "bit_depth": 24, "lossless": True}},
+    })[0] == 200
+
+    def query(command):
+        status, messages = request("POST", "/cometd", {
+            "channel": "/slim/request", "clientId": "metadata-test", "id": 90,
+            "data": {"request": ["00:00:00:00:00:01", command],
+                     "response": "/metadata-test/reply"},
+        })
+        assert status == 200
+        return next(message["data"] for message in messages
+                    if message.get("channel") == "/metadata-test/reply")
+
+    selected = query(["status", "-", 1, "tags:oTIQ"])["playlist_loop"][0]
+    assert selected["type"] == "flc" and selected["samplerate"] == 96000
+    assert selected["samplesize"] == 24 and selected["lossless"] == 1
+    assert "artist" not in selected
+    info = query(["songinfo", 0, 100, "track_id:-1", "tags:I"])["songinfo_loop"]
+    assert {"samplesize": 24} in info
+    selected_by_url = query(["songinfo", 0, 100,
+                             "url:http://example.org/serverstatus/jiveapplets", "tags:I"])
+    assert {"samplesize": 24} in selected_by_url["songinfo_loop"]
+    menu = query(["contextmenu", 0, 100, "menu:track", "context:playlist", "playlist_index:0"])
+    assert menu["count"] == len(menu["item_loop"])
+    assert "Sample size (bits): 24" in [row["text"] for row in menu["item_loop"]]
+
     status, second = request("POST", "/api/nowplaying/claim",
                              {"source": "radio", "name": "Standalone Radio"})
     assert status == 201 and second["generation"] > first["generation"]

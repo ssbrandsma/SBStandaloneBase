@@ -339,7 +339,7 @@ static client *stream_for_id(const char *id)
  */
 static void publish_playerstatus(void)
 {
-	char data[4096], event[8192], channel[128];
+	char data[6144], event[8192], channel[128];
 	int i, subscribers = 0, delivered = 0;
 	if (!player_id[0])
 		return;
@@ -718,8 +718,8 @@ static int load_catalog(const char *path)
  * @param cap Destination capacity including the terminator.
  * @return One on success, zero for malformed or oversized input.
  */
-static int command_string(const char **cursor, const char *end,
-			  char *out, size_t cap)
+static int
+command_string(const char **cursor, const char *end, char *out, size_t cap)
 {
 	const char *p = *cursor;
 	size_t n = 0;
@@ -791,14 +791,14 @@ static int switch_server(const char *start, const char *end)
 	if (!command_delimiter(&p, end, ',') ||
 	    !command_string(&p, end, address, sizeof address) ||
 	    !command_delimiter(&p, end, ']') ||
-	    !command_delimiter(&p, end, ']') ||
-	    !valid_player_id(player) || inet_pton(AF_INET, address, &ip) != 1)
+	    !command_delimiter(&p, end, ']') || !valid_player_id(player) ||
+	    inet_pton(AF_INET, address, &ip) != 1)
 		return -1;
 	host = ntohl(ip.s_addr);
 	if ((host >> 24) == 0 || (host >> 24) >= 224)
 		return -1;
-	size = sb_server_frame("serv", &ip.s_addr, sizeof ip.s_addr,
-			       frame, sizeof frame);
+	size = sb_server_frame(
+		"serv", &ip.s_addr, sizeof ip.s_addr, frame, sizeof frame);
 	for (i = 0; i < CLIENTS; i++) {
 		client *c = &clients[i];
 
@@ -807,8 +807,10 @@ static int switch_server(const char *start, const char *end)
 			continue;
 		if (!send_data(c, (const char *)frame, size))
 			return -1;
-		fprintf(stderr, "Server switch player=%s destination=%s\n",
-			player, address);
+		fprintf(stderr,
+			"Server switch player=%s destination=%s\n",
+			player,
+			address);
 		return 1;
 	}
 	return -1;
@@ -866,8 +868,12 @@ request_responses(const char *body, const sb_config *cfg, char *out, size_t cap)
 		reply[0] = 0;
 		if (before(p, "\"id\"", next))
 			json_raw(p, "\"id\"", id, sizeof id);
-		snprintf(id_field, sizeof id_field, "%s%s%s",
-			 id[0] ? "\"id\":" : "", id, id[0] ? "," : "");
+		snprintf(id_field,
+			 sizeof id_field,
+			 "%s%s%s",
+			 id[0] ? "\"id\":" : "",
+			 id,
+			 id[0] ? "," : "");
 		if (before(p, "\"response\"", next))
 			json_string(p, "\"response\"", reply, sizeof reply);
 		if (!reply[0]) {
@@ -877,16 +883,26 @@ request_responses(const char *body, const sb_config *cfg, char *out, size_t cap)
 
 		switched = switch_server(p, next);
 		if (switched < 0) {
-			snprintf(msg, sizeof msg,
+			snprintf(msg,
+				 sizeof msg,
 				 "{%s\"channel\":\"/slim/request\","
-				 "\"successful\":false,\"error\":\"Server switch failed\"}", id_field);
+				 "\"successful\":false,\"error\":\"Server "
+				 "switch failed\"}",
+				 id_field);
 			add_json(out, cap, &used, msg);
 			p = next;
 			continue;
 		}
 		if (switched)
 			strcpy(data, "{}");
-		else if (before(p, "serverstatus", next))
+		else if (np_lms_query_json(nowplaying,
+					   p,
+					   (size_t)(next - p),
+					   data,
+					   sizeof data)) {
+			if (before(p, "\"status\"", next))
+				register_playerstatus(reply);
+		} else if (before(p, "serverstatus", next))
 			snprintf(data,
 				 sizeof data,
 				 "{\"httpport\":\"%u\",\"ip\":\"%s\","

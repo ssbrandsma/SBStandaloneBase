@@ -297,7 +297,8 @@ try:
     # the latest complete snapshot without requiring another producer update.
     replacement = EventStream(cid)
     replay = replacement.next_playerstatus()["data"]
-    assert replay["item_loop"][0]["params"]["track_id"] == "station:rapid:11"
+    assert replay["item_loop"][0]["params"]["track_id"] == -1
+    assert replay["item_loop"][0]["track"] == ""
 
     assert api("POST", "/api/nowplaying/release", {"session_id": token})[0] == 200
     stopped = replacement.next_playerstatus()["data"]
@@ -320,7 +321,7 @@ try:
     assert first["count"] == len(first["item_loop"]) == 1
     assert first["offset"] == 0
     assert len(first["item_loop"]) == 1
-    assert first["item_loop"][0]["params"]["track_id"] == "900001"
+    assert first["item_loop"][0]["params"]["track_id"] == -1
     assert first["item_loop"][0]["track"] == "Sultans of Swing"
     assert first["item_loop"][0]["artist"] == "Dire Straits"
     assert first["item_loop"][0]["album"] == "Dire Straits"
@@ -329,7 +330,7 @@ try:
     status, result = post({}, "/test/next-track")
     assert status == 200 and result["status"] == "ok"
     changed = first_stream.next_playerstatus()["data"]
-    assert changed["item_loop"][0]["params"]["track_id"] == "900002"
+    assert changed["item_loop"][0]["params"]["track_id"] == -1
     assert changed["item_loop"][0]["track"] == "Money for Nothing"
     assert changed["playlist_timestamp"] > first["playlist_timestamp"]
     unrelated_stream.assert_no_playerstatus()
@@ -337,9 +338,9 @@ try:
     # Replacing the active stream and re-subscribing returns current state.
     replacement = EventStream(first_id)
     inherited = replacement.next_playerstatus()["data"]
-    assert inherited["item_loop"][0]["params"]["track_id"] == "900002"
+    assert inherited["item_loop"][0]["params"]["track_id"] == -1
     current = subscribe(first_id)
-    assert current["item_loop"][0]["params"]["track_id"] == "900002"
+    assert current["item_loop"][0]["params"]["track_id"] == -1
     status, _ = post({
         "channel": "/slim/unsubscribe", "clientId": first_id, "id": 9,
         "data": {"unsubscribe": f"/{first_id}/slim/playerstatus/{PLAYER}"},

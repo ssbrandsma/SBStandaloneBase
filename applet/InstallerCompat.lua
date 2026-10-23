@@ -13,6 +13,20 @@ function M.apply(installer, options)
         local manager = options and options.appletManager or appletManager
         local ok, result = pcall(function()
             assert(manager, "AppletManager is unavailable")
+            -- Closing the menu frees the installer and clears package.loaded.
+            -- Every newly managed instance must receive the adapter, too.
+            if manager._standaloneInstallerLoader ~= manager.loadApplet then
+                local load = manager.loadApplet
+                local wrapped = function(self, name, ...)
+                    local instance = load(self, name, ...)
+                    if name == "SetupAppletInstaller" and type(instance) == "table" then
+                        M.apply(instance, options)
+                    end
+                    return instance
+                end
+                manager.loadApplet = wrapped
+                manager._standaloneInstallerLoader = wrapped
+            end
             return assert(manager:loadApplet("SetupAppletInstaller"), "Applet Installer did not load")
         end)
         if not ok then log:warn("StandaloneBase: installer compatibility unavailable: ", tostring(result)); return false end
@@ -50,17 +64,62 @@ function M.apply(installer, options)
         route(self) -- Stock menu chooses the first physical package.path entry.
         return result
     end
-    installer._download = function(self, ...) route(self); return download(self, ...) end
+    installer._download = function(self, ...)
+        route(self)
+        self._standaloneInstallerError = nil
+        self._standaloneInstallerCompleted = {}
+        local result = download(self, ...)
+        for name in pairs(self.todownload or {}) do
+            if not self._standaloneInstallerCompleted[name] then
+                self._standaloneInstallerError = self._standaloneInstallerError or ("Download or verification did not complete: " .. name)
+            end
+        end
+        return result
+    end
     installer._remove = function(self, ...) route(self); return remove(self, ...) end
+    if type(installer._sha1Sink) == "function" then
+        local shaSink=installer._sha1Sink
+        installer._sha1Sink=function(self,...)
+            local sink=shaSink(self,...)
+            return function(chunk,err)
+                if err then
+                    self._standaloneInstallerError=tostring(err)
+                    self.fetchedsha=nil;self.fetched=true
+                    return nil,err
+                end
+                return sink(chunk)
+            end
+        end
+    end
+    if type(installer._finished) == "function" then
+        local finished=installer._finished
+        installer._finished=function(self,...)
+            if not self._standaloneInstallerError then return finished(self,...) end
+            local message=self._standaloneInstallerError
+            log:warn("StandaloneBase: Applet Installer stopped: ",message)
+            if self.animatewindow then self.animatewindow:hide() end
+            if options and options.showError then options.showError(message);return end
+            local Window=require("jive.ui.Window")
+            local Textarea=require("jive.ui.Textarea")
+            local window=Window("text_list","Installation failed")
+            window:addWidget(Textarea("help_text",message))
+            self._standaloneInstallerErrorWindow=window
+            window:show()
+        end
+    end
     installer._zipSink = function(self, directory)
-        local handle
+        local handle, failed
+        local reject
         local function close()
             if handle then
                 local file=handle; handle=nil
-                if not file:close() then error("StandaloneBase: applet ZIP member close failed") end
+                if not file:close() then reject("cannot close member") end
             end
         end
-        local function reject(reason)
+        reject = function(reason)
+            failed=true
+            self._standaloneInstallerError="Applet ZIP extraction failed: "..reason
+            self.fetched=true -- Wake the stock download task even on sink failure.
             close()
             error("StandaloneBase: applet ZIP extraction failed: " .. reason)
         end
@@ -71,9 +130,14 @@ function M.apply(installer, options)
             if not attr and not fs.mkdir(path) then reject("cannot create directory") end
         end
         return function(chunk, err)
+            if failed then return nil,self._standaloneInstallerError end
             if err then reject(tostring(err)) end
             if chunk == nil then
-                close(); self.fetched = true; return nil
+                close(); self.fetched = true
+                if self._standaloneInstallerCompleted then
+                    self._standaloneInstallerCompleted[root:match("/([^/]+)$")]=true
+                end
+                return nil
             elseif type(chunk) == "table" then
                 close()
                 local name = type(chunk.filename) == "string" and chunk.filename:gsub("\\", "/") or ""

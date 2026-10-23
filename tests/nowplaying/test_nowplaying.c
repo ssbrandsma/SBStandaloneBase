@@ -47,6 +47,7 @@ int main(void)
 	struct timespec delay = {1, 100000000};
 
 	assert(m);
+	assert(sizeof(np_status) < 8192);
 	/* SlimBrowser.DB requires count even when the playlist is empty. */
 	assert(np_playerstatus_json(m, reply, sizeof reply) > 0);
 	assert(strstr(reply, "\"count\":0,"));
@@ -164,6 +165,7 @@ int main(void)
 		    reply,
 		    sizeof reply) == 409);
 	np_destroy(m);
-	puts("nowplaying-unit-tests-ok");
+	printf("nowplaying-unit-tests-ok (snapshot=%zu bytes)\n",
+	       sizeof(np_status));
 	return 0;
 }
