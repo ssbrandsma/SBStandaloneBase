@@ -26,7 +26,7 @@
 #include "../common/public_address.h"
 #include "../common/http_trace.h"
 #include "hls.h"
-#include "http_trace_curl.h"
+#include "tls_diagnostics.h"
 
 /** Enforce opt-in public destinations on actual sockets, including redirects.
  */
@@ -63,7 +63,7 @@ static curl_socket_t public_image_socket(void *data,
 	return socket(address->family, address->socktype, address->protocol);
 }
 
-#define VERSION "0.5.9"
+#define VERSION "0.6.0"
 
 #define MAX_REQUEST 16384
 #define MAX_HEADERS 32768
@@ -876,6 +876,7 @@ static void *worker_main(void *opaque)
 	struct curl_slist *headers = NULL;
 
 	transfer_ctx transfer;
+	sb_tls_diagnostic tls_diagnostic;
 	CURLcode result;
 
 	struct timespec start;
@@ -1018,7 +1019,7 @@ static void *worker_main(void *opaque)
 	}
 
 	configure_curl(curl, url, headers, &transfer, is_head, curl_error);
-    sb_trace_curl(curl,&transfer.trace);
+    sb_tls_configure(curl,&tls_diagnostic,&transfer.trace);
 	/* Opt-in only: ordinary compatibility-proxy requests retain their
 	 * policy. */
 	if (artwork || plain_http || hls ||
@@ -1111,7 +1112,9 @@ static void *worker_main(void *opaque)
 	}
 
 	log_transfer_result(result, curl_error, &transfer, &start, &end);
-    sb_trace_end(&transfer.trace,transfer.status,(unsigned long long)transfer.bytes,result==CURLE_OK ? NULL : curl_easy_strerror(result));
+    sb_tls_finish(curl,&tls_diagnostic,result,curl_error);
+    sb_trace_end(&transfer.trace,transfer.status,(unsigned long long)transfer.bytes,
+                 result==CURLE_OK ? NULL : curl_error[0] ? curl_error : curl_easy_strerror(result));
 
 done:
 	if (curl) {

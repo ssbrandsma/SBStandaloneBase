@@ -23,6 +23,12 @@ flags="-Os -marm -march=armv5te -mtune=arm926ej-s -mfloat-abi=soft -ffunction-se
 test -x "$cc" || { echo "Missing ARM compiler: $cc" >&2; exit 1; }
 test -f "$tls_prefix/lib/libcurl.a" || { echo "Missing static libcurl in $tls_prefix" >&2; exit 1; }
 test -f "$tls_prefix/lib/libwolfssl.a" || { echo "Missing static wolfSSL in $tls_prefix" >&2; exit 1; }
+wolf_prefix="${ARM_WOLFSSL_PREFIX:-$root/build-proxy-tls/prefix}"
+if [ ! -f "$wolf_prefix/sbproxy-rsa-capacity" ] ||
+   [ "$(tr -d '\r\n' < "$wolf_prefix/sbproxy-rsa-capacity")" != 4096 ]; then
+  SBHTTPSPROXY_ROOT="$SBHTTPSPROXY_ROOT" sh "$root/scripts/build-proxy-tls.sh"
+fi
+test -f "$wolf_prefix/lib/libwolfssl.a"
 mkdir -p "$out"
 
 "$cc" -static $flags -std=c99 -Wall -Wextra -Wpedantic -Wl,--gc-sections \
@@ -36,10 +42,10 @@ mkdir -p "$out"
   "$root/native/sbwebserver/third_party/mongoose.c" -o "$out/sbwebserver"
 
 "$cc" -static $flags -std=c99 -Wall -Wextra -Wpedantic -pthread -Wl,--gc-sections \
-  -D_GNU_SOURCE -I"$tls_prefix/include" "$root/native/sbproxy/sbproxy.c" \
+  -D_GNU_SOURCE -I"$wolf_prefix/include" -I"$tls_prefix/include" "$root/native/sbproxy/sbproxy.c" \
   "$root/native/sbproxy/hls_playlist.c" "$root/native/sbproxy/hls_audio.c" "$root/native/sbproxy/hls_relay.c" \
   "$root/native/sbproxy/hls_id3.c" "$root/native/sbproxy/hls_metadata.c" \
-  "$tls_prefix/lib/libcurl.a" "$tls_prefix/lib/libwolfssl.a" -o "$out/sbproxy"
+  "$tls_prefix/lib/libcurl.a" "$wolf_prefix/lib/libwolfssl.a" -o "$out/sbproxy"
 
 "$cc" -static $flags -std=c99 -Wall -Wextra -Wpedantic -Wl,--gc-sections \
   "$root/native/sbstorage/sb_storage_helper.c" -o "$out/sb-storage-helper"

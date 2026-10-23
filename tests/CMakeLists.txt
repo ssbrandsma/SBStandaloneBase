@@ -115,11 +115,16 @@ if(NOT WIN32)
     if(TARGET sbproxy)
       find_package(CURL REQUIRED)
       find_package(Threads REQUIRED)
+      add_executable(test_tls_diagnostics tls/test_tls_diagnostics.c)
+      target_link_libraries(test_tls_diagnostics PRIVATE CURL::libcurl Threads::Threads)
+      add_test(NAME proxy_tls_diagnostics COMMAND test_tls_diagnostics)
       add_executable(sbproxy_test ../native/sbproxy/sbproxy.c
         ../native/sbproxy/hls_playlist.c ../native/sbproxy/hls_audio.c ../native/sbproxy/hls_relay.c
         ../native/sbproxy/hls_id3.c ../native/sbproxy/hls_metadata.c)
       target_compile_definitions(sbproxy_test PRIVATE _GNU_SOURCE SB_PROXY_TESTING)
       target_link_libraries(sbproxy_test PRIVATE CURL::libcurl Threads::Threads)
+      add_test(NAME proxy_tls_integration COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tls/test_proxy_tls.py $<TARGET_FILE:sbproxy_test>)
       add_executable(test_hls images/test_hls.c ../native/sbproxy/hls_playlist.c ../native/sbproxy/hls_audio.c ../native/sbproxy/hls_id3.c)
       add_executable(test_hls_id3 images/test_hls_id3.c ../native/sbproxy/hls_id3.c)
       add_test(NAME hls_id3 COMMAND test_hls_id3)
