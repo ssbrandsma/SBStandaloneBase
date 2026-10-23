@@ -1,5 +1,12 @@
 -- Generic PNG/JPEG/SVG artwork helper. Decode and resizing stay in native code.
+local ArtworkUrlNormalizer = require("applets.StandaloneBase.ArtworkUrlNormalizer")
 local M = {}
+-- Logging is optional so the URL helper remains usable in standalone fixtures.
+local haveLog, Log = pcall(require, "jive.utils.log")
+local log = haveLog and Log.logger("StandaloneBase")
+local function diagnosticUrl(url)
+    return (url:gsub("[?#].*", "?[redacted]")):sub(1, 512)
+end
 
 local function webPort()
     local f = io.open("/mnt/storage/standalonebase/settings.conf", "r")
@@ -30,6 +37,12 @@ function M.artworkUrl(url, width, height, mime)
     width, height = tonumber(width) or 320, tonumber(height) or 240
     if width % 1 ~= 0 or height % 1 ~= 0 or width < 16 or width > 512 or height < 16 or height > 512 then return nil end
     width, height = math.min(width, 320), math.min(height, 240)
+    local original = url
+    url = ArtworkUrlNormalizer.normalize(url)
+    if url ~= original and log and log.debug then
+        log:debug("StandaloneBase: artwork_url rule=wikimedia_thumbnail original=", diagnosticUrl(original),
+            " normalized=", diagnosticUrl(url))
+    end
     local escaped = url:gsub("([^%w%-_%.~])", function(c) return string.format("%%%02X", string.byte(c)) end)
     return "http://127.0.0.1:" .. webPort() .. "/api/image/render?url=" .. escaped ..
         "&width=" .. width .. "&height=" .. height

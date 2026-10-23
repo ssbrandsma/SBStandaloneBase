@@ -1,4 +1,5 @@
 package.path = arg[1] .. "/applet/?.lua;" .. package.path
+package.preload["applets.StandaloneBase.ArtworkUrlNormalizer"] = function() return require("ArtworkUrlNormalizer") end
 local helper = require("ImageRender")
 local png = "https://example.invalid/logo.png"
 assert(helper.artworkUrl(png):find("/api/image/render?", 1, true))

@@ -7,7 +7,13 @@ local function read(path)
     f:close()
     return text
 end
+package.preload["jive.utils.log"] = function()
+    return {logger=function() return {warn=function() end,debug=function() end} end}
+end
 local compile = loadstring or load
+package.preload["applets.StandaloneBase.ArtworkUrlNormalizer"] = function()
+    return dofile(root .. "/applet/ArtworkUrlNormalizer.lua")
+end
 package.preload["applets.StandaloneBase.ImageRender"] = function()
     return dofile(root .. "/applet/ImageRender.lua")
 end
@@ -25,6 +31,8 @@ local viewer = read(viewerPath):match("(function requestImage%b().-)self.current
 assert(compile(assert(viewer) .. "return urlString\nend"))()
 for _, source in ipairs({"http://example.com/a.png", "https://example.com/a.jpg?q=a%2Fb&x=2",
     "http://example.com/a.svg?x=1", "https://example.com/a.svg",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/example.svg/640px-example.svg.png",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/example.svg/250px-example.svg.png",
     "http://127.0.0.1:8765/https/example.com/a.jpg", "http://localhost/a.png",
     "http://192.168.1.2/a.jpg", "http://172.31.1.1/a.jpg"}) do
     local self = {imageCache={}, artworkThumbIcons={}, artworkFetchQueue={},

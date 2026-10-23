@@ -27,6 +27,14 @@ class Source(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         Source.count += 1
+        if self.path.startswith('/jpeg-'):
+            name={'/jpeg-baseline':'baseline.jpg','/jpeg-progressive':'progressive.jpg',
+                  '/jpeg-resource':'jpeg-coefficient-limit.jpg','/jpeg-unsupported':'jpeg-cmyk.jpg'}.get(self.path)
+            data=(pathlib.Path(__file__).parent/'fixtures'/name).read_bytes() if name else b'\xff\xd8invalid image'
+            self.send_response(200)
+            self.send_header('Content-Type','image/jpeg')
+            self.send_header('Content-Length',str(len(data)))
+            self.end_headers();self.wfile.write(data);return
         if self.path.startswith('/raster'):
             data = raster_png(640, 480, lambda y: bytes([240, 20, 30, 255]) * 640)
             if self.path == '/raster-large':
@@ -159,6 +167,12 @@ def main():
                     for path in ['/raster', '/raster-chunked', '/raster-close', '/raster-large']:
                         status, png, _ = request(image('http://image.test' + path))
                         assert status == 200 and decode(png)[:2] == (320, 240), (path, status, png)
+                    for path in ['/jpeg-baseline','/jpeg-progressive']:
+                        status,png,_=request(image('http://image.test'+path))
+                        assert status==200 and decode(png)[:2]==(320,240),(path,status)
+                    assert request(image('http://image.test/jpeg-invalid'))[0]==415
+                    assert request(image('http://image.test/jpeg-unsupported'))[0]==415
+                    assert request(image('http://image.test/jpeg-resource'))[0]==503
                     assert request(image('http://image.test/raster-truncated'))[0] == 502
                     before = Source.count
                     assert request(image('https://image.test/logo'))[0] == 503

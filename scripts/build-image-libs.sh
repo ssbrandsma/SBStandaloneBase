@@ -33,5 +33,5 @@ for arch in host arm; do
   cmake --build "$work/jpeg-$arch" --target jpeg-static -j4
   mkdir -p "$prefix/include" "$prefix/lib"
   cp "$work/jpeg-$arch/libjpeg.a" "$prefix/lib/"
-  cp "$work/jpeg-$arch/jconfig.h" "$work/jpeg/src/jpeglib.h" "$work/jpeg/src/jmorecfg.h" "$prefix/include/"
+  cp "$work/jpeg-$arch/jconfig.h" "$work/jpeg/src/jpeglib.h" "$work/jpeg/src/jmorecfg.h" "$work/jpeg/src/jerror.h" "$prefix/include/"
 done

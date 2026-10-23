@@ -1,5 +1,5 @@
 -- Shared Jive artwork adapter. Raster bytes stay in the streaming proxy;
--- only SVG uses ImageRender's existing bounded native conversion/cache.
+-- ImageRender owns shared URL normalization and bounded native conversion/cache.
 local ImageRender = require("applets.StandaloneBase.ImageRender")
 local M = {}
 local log = require("jive.utils.log").logger("StandaloneBase")

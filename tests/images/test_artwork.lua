@@ -2,6 +2,9 @@ local root = arg[1]
 package.preload["jive.utils.log"] = function()
     return {logger=function() return {warn=function() end} end}
 end
+package.preload["applets.StandaloneBase.ArtworkUrlNormalizer"] = function()
+    return dofile(root .. "/applet/ArtworkUrlNormalizer.lua")
+end
 package.preload["applets.StandaloneBase.ImageRender"] = function()
     return dofile(root .. "/applet/ImageRender.lua")
 end

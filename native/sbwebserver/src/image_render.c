@@ -7,6 +7,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "image_render.h"
+#include "settings.h"
 #include "../../common/http_trace.h"
 #include "auth.h"
 #include "remote.h"
@@ -44,9 +45,11 @@ typedef struct {
 } ImageUrl;
 
 typedef struct {
-	unsigned status, size, cached;
+	unsigned status, size, cached, fallback_failed;
 } Result;
 
+static struct { char key[65]; uint64_t until; } fallback_backoff[16];
+static unsigned fallback_backoff_next;
 static struct {
 	pid_t pid;
 	int pipe;
@@ -59,6 +62,7 @@ static struct {
 	size_t received;
 	uint64_t deadline;
 	size_t input_limit;
+    int fallback_suppressed;
 } job;
 
 /** Compare an HTTP token without reading beyond its bounded Mongoose string. */
@@ -170,7 +174,7 @@ static int resolve_public(const ImageUrl *u, char ip[INET_ADDRSTRLEN])
 	int ok = 0;
 #ifdef SB_IMAGE_TESTING
 	/* Test-only origin mapping is absent from release binaries. */
-	if (!strcmp(u->host, "image.test") && getenv("SB_IMAGE_TEST_IP")) {
+	if ((!strcmp(u->host, "image.test") || !strcmp(u->host,"fallback.test")) && getenv("SB_IMAGE_TEST_IP")) {
 		snprintf(ip, INET_ADDRSTRLEN, "%s", getenv("SB_IMAGE_TEST_IP"));
 		return 1;
 	}
@@ -197,6 +201,7 @@ typedef struct {
 	char *body;
 	size_t size;
 	unsigned status;
+    int upstream_status;
 	int done, capability;
 	char location[URL_LIMIT];
 	FILE *stream;
@@ -225,7 +230,8 @@ static void stream_body(struct mg_connection *c, Fetch *f)
 			for (size_t j = 0; j < i && c->recv.buf[j] != ';'; j++) {
 				unsigned char ch = c->recv.buf[j];
 				unsigned d = ch >= '0' && ch <= '9' ? ch-'0' : ch >= 'a' && ch <= 'f' ? ch-'a'+10 : ch >= 'A' && ch <= 'F' ? ch-'A'+10 : 16;
-				if (d > 15 || value > f->limit/16) goto invalid;
+				if (d > 15) goto invalid;
+                if (value > f->limit/16) goto too_large;
 				value = value * 16 + d; digits++;
 			}
 			if (!digits) goto invalid;
@@ -269,12 +275,13 @@ static void fetch_event(struct mg_connection *c, int event, void *data)
 		}
 		return;
 	}
-	if (event == MG_EV_READ && c->recv.len > SVG_LIMIT + 16384u) {
+	if (event == MG_EV_READ && c->recv.len > (f->stream && f->limit<SVG_LIMIT ? f->limit : SVG_LIMIT) + 16384u) {
 		f->status = 413;
 		f->done = 1;
 		c->is_closing = 1;
 	} else if (event == MG_EV_HTTP_HDRS) {
 		struct mg_http_message *m = data;
+        f->upstream_status=mg_http_status(m);
         sb_trace_header(&f->trace,mg_http_status(m),"",0);
         const char *names[]={"Content-Type","Content-Length","Location"};
         for (unsigned i=0;i<3;i++) {
@@ -388,9 +395,9 @@ static Fetch fetch_once(const char *address,
 
 /** Download with per-hop validation and a single overall eight-second deadline.
  */
-static Fetch download(ImageUrl u, const char *file, const char *parent)
+static Fetch download_bounded(ImageUrl u, const char *file, const char *parent, unsigned timeout_ms)
 {
-	uint64_t deadline = mg_millis() + 8000;
+	uint64_t deadline = mg_millis() + timeout_ms;
 	Fetch f = {0};
 	for (unsigned hop = 0; hop <= 3; hop++) {
 		char ip[INET_ADDRSTRLEN], address[128], path[URL_LIMIT + 16];
@@ -421,8 +428,9 @@ static Fetch download(ImageUrl u, const char *file, const char *parent)
 				f.status = 400;
 				return f;
 			}
-			return fetch_once(
+			f = fetch_once(
 				proxy, "127.0.0.1", path, 1, deadline, file,parent);
+            goto redirect_handling;
 		}
 		unsigned port = 80;
 #ifdef SB_IMAGE_TESTING
@@ -432,6 +440,7 @@ static Fetch download(ImageUrl u, const char *file, const char *parent)
 #endif
 		snprintf(address, sizeof address, "http://%s:%u", ip, port);
 		f = fetch_once(address, u.host, u.path, 0, deadline, file,parent);
+redirect_handling:
 		if (f.status < 300 || f.status >= 400)
 			return f;
 		if (hop == 3 || !f.location[0]) {
@@ -640,7 +649,7 @@ static int write_all(int fd, const void *data, size_t size)
 /** Execute local-file conversion without a shell; watchdog kills the whole
  * group. */
 static unsigned
-convert_file(const char *input, const char *output, int width, int height)
+convert_file(const char *input, const char *output, int width, int height, const char *trace_id, int *exit_code)
 {
 	char executable[1024], w[16], h[16];
 	const char *override = getenv("SB_IMAGE_RENDERER");
@@ -665,6 +674,7 @@ convert_file(const char *input, const char *output, int width, int height)
 	if (pid < 0)
 		return 503;
 	if (!pid) {
+        setenv("SB_IMAGE_TRACE_ID",trace_id,1);
 		execl(executable,
 		      executable,
 		      "--input",
@@ -684,9 +694,83 @@ convert_file(const char *input, const char *output, int width, int height)
 			return 503;
 	if (!WIFEXITED(status))
 		return 503;
+    int code=WEXITSTATUS(status);
+    *exit_code=code;
+    if (code) sb_trace_log("event=image_renderer id=%s category=%s exit=%d",trace_id,
+        code==69 ? "unsupported_format" : code==65 ? "invalid_image" :
+        code==74 ? "decoder_failure" : code==73 ? "encoding_failure" :
+        code==75 ? "resource_limit" : "renderer_unavailable",code);
 	return WEXITSTATUS(status) == 0	   ? 200
-	       : WEXITSTATUS(status) == 65 ? 415
+	       : (WEXITSTATUS(status) == 65 || WEXITSTATUS(status) == 69 || WEXITSTATUS(status) == 74) ? 415
 					   : 503;
+}
+
+/* Fallback URLs must be public and credential-free. Query keys are checked
+ * after decoding, so percent-encoded credential names cannot bypass policy. */
+static int fallback_source_safe(const ImageUrl *source, const ImageUrl *service) {
+    char ip[INET_ADDRSTRLEN];
+    if (!strcmp(source->host,"api.lms-community.org") || !strcmp(source->host,service->host)) return 0;
+    if (!resolve_public(source,ip)) return 0;
+    const char *query=strchr(source->path,'?');
+    if (query) {
+        char decoded[URL_LIMIT];
+        int n=mg_url_decode(query+1,strlen(query+1),decoded,sizeof decoded,1);
+        if (n<0 || (size_t)n!=strlen(decoded)) return 0;
+        for (int i=0;i<n;i++) decoded[i]=(char)tolower((unsigned char)decoded[i]);
+        const char *secret[]={"token","auth","signature","credential","secret","password","api_key","apikey","session","cookie","jwt","sig=","key=","code="};
+        for (unsigned i=0;i<sizeof secret/sizeof *secret;i++) if (strstr(decoded,secret[i])) return 0;
+        /* Unknown query keys may carry opaque credentials. Only ordinary image
+         * sizing/version parameters are eligible for sharing externally. */
+        char *cursor=decoded;
+        while (*cursor) {
+            char *end=strchr(cursor,'&');if (end) *end=0;
+            char *value=strchr(cursor,'=');if (!value) return 0;*value=0;
+            const char *allowed[]={"w","h","width","height","size","format","quality","fit","crop","auto","v","lang"};
+            int known=0;
+            for (unsigned i=0;i<sizeof allowed/sizeof *allowed;i++) if (!strcmp(cursor,allowed[i])) known=1;
+            if (!known) return 0;
+            if (!end) break;
+            cursor=end+1;
+        }
+    }
+    return 1;
+}
+static int fallback_url(const ImageUrl *source, const Settings *settings, int width, int height, ImageUrl *out) {
+    ImageUrl service;
+    const char *base=settings->artwork_external_fallback_base_url;
+    if (!parse_url(base,&service) || !service.https || strchr(base,'?') || base[strlen(base)-1]!='/') return 0;
+    if (!fallback_source_safe(source,&service)) return 0;
+    char text[URL_LIMIT]; size_t used=strlen(base);
+    memcpy(text,base,used);
+    const unsigned char *p=(const unsigned char *)source->normalized;
+    for (;*p;p++) {
+        int plain=isalnum(*p) || *p=='-' || *p=='_' || *p=='.' || *p=='~';
+        if (used+(plain ? 1u : 3u)+16>=sizeof text) return 0;
+        if (plain) text[used++]=(char)*p;
+        else { snprintf(text+used,4,"%%%02X",*p);used+=3; }
+    }
+    /* Width is never greater than the display's smaller bound: portrait and
+     * square results stay bounded before the final local aspect-fit pass. */
+    unsigned bound=(unsigned)(width<height ? width : height);
+    if (bound>240) bound=240;
+    snprintf(text+used,sizeof text-used,"?w=%u",bound);
+    return parse_url(text,out);
+}
+/* A rejected XML/SVG must not bypass the existing SVG feature/security
+ * policy through an external converter. This only classifies failure; it
+ * does not change SVG parsing or rendering. */
+static int rejected_xml(const char *file) {
+    unsigned char bytes[512];FILE *f=fopen(file,"rb");if (!f) return 1;
+    size_t n=fread(bytes,1,sizeof bytes,f);fclose(f);
+    size_t i=n>=3 && !memcmp(bytes,"\357\273\277",3) ? 3 : 0;
+    while (i<n && isspace(bytes[i])) i++;
+    return i==n || bytes[i]=='<';
+}
+static int raster_signature(const char *file) {
+    unsigned char bytes[8];FILE *f=fopen(file,"rb");
+    if (!f) return 0;
+    size_t n=fread(bytes,1,sizeof bytes,f);fclose(f);
+    return n!=8 ? 0 : !memcmp(bytes,"\211PNG\r\n\032\n",8) ? 1 : (bytes[0]==255 && bytes[1]==216) ? 2 : 0;
 }
 
 /** Run all blocking download, filesystem, cache and conversion work off-loop.
@@ -698,7 +782,11 @@ static void worker(int pipe_fd,
 		   int width,
 		   int height)
 {
-	Result result = {200, 0, 0};
+	Result result = {200, 0, 0, 0};
+    Settings settings; settings_load(&settings);
+    int renderer_exit=-1,eligible=0,external=0;
+    unsigned local_status=200;
+    const char *local_reason="success";
 	char directory[768] = "", target[1024], input[180], output[180];
 	unsigned char *png = NULL;
 	size_t png_size = 0;
@@ -726,10 +814,10 @@ static void worker(int pipe_fd,
 		body ? "local" : "remote",
 		body ? "upload" : source->host,
 		width,
-		height, IMAGE_LIMIT);
+		height, (unsigned)job.input_limit);
 	if (!body) {
 		fprintf(stderr, "[svg-image] download start\n");
-		fetched = download(*source, input,trace.id);
+		fetched = download_bounded(*source, input,trace.id,8000);
 		if (fetched.status != 200 || !fetched.size) {
 			result.status = fetched.status == 403 ||
 							fetched.status == 413 ||
@@ -737,7 +825,9 @@ static void worker(int pipe_fd,
 							fetched.status == 504
 						? fetched.status
 						: 502;
-			goto send;
+            eligible=fetched.status==413 && (fetched.upstream_status==200 || fetched.upstream_status==413);
+            local_reason=eligible ? "payload_too_large" : "fetch_failure";
+            goto local_done;
 		}
 		body_size = fetched.size;
 		fprintf(stderr,
@@ -756,19 +846,51 @@ static void worker(int pipe_fd,
 			goto send;
 		}
 	}
-	result.status = convert_file(input, output, width, height);
+	result.status = convert_file(input, output, width, height,trace.id,&renderer_exit);
+    eligible=renderer_exit==65 || renderer_exit==69 || renderer_exit==74 || renderer_exit==75;
+    local_reason=renderer_exit==75 ? "decoder_resource_limit" : renderer_exit==69 ? "unsupported_format" : "conversion_failure";
+local_done:
+    local_status=result.status;
+    if (renderer_exit==65 && rejected_xml(input)) eligible=0;
+    if (result.status!=200 && !body && eligible && settings.artwork_external_fallback_enabled && job.fallback_suppressed)
+        sb_trace_log("event=artwork_fallback id=%s state=skipped reason=backoff",trace.id);
+    if (result.status!=200 && !body && eligible && settings.artwork_external_fallback_enabled && !job.fallback_suppressed) {
+        ImageUrl fallback;
+        if (fallback_url(source,&settings,width,height,&fallback)) {
+            unsigned original_status=result.status;
+            sb_trace_log("event=artwork_local id=%s status=%u reason=%s",trace.id,result.status,local_reason);
+            sb_trace_log("event=artwork_fallback id=%s state=attempted provider=lms-community",trace.id);
+            /* Release original storage before fetching the bounded replacement. */
+            unlink(input);unlink(output);free(fetched.body);fetched.body=NULL;
+            size_t original_limit=job.input_limit;
+            job.input_limit=settings.artwork_external_fallback_max_bytes;
+            if (job.input_limit>original_limit) job.input_limit=original_limit;
+            Fetch replacement=download_bounded(fallback,input,trace.id,(unsigned)settings.artwork_external_fallback_timeout*1000);
+            job.input_limit=original_limit;
+            int replacement_exit=-1;
+            unsigned converted=415;
+            int format=replacement.status==200 && replacement.size ? raster_signature(input) : 0;
+            int valid=format!=0;
+            if (valid) converted=convert_file(input,output,width,height,trace.id,&replacement_exit);
+            sb_trace_log("event=artwork_fallback_result id=%s status=%u bytes=%zu format=%s conversion=%u",trace.id,replacement.status,replacement.size,format==1 ? "image/png" : format==2 ? "image/jpeg" : "invalid",converted);
+            free(replacement.body);
+            if (valid && converted==200) { result.status=200;external=1; }
+            else { result.status=original_status;result.fallback_failed=1; }
+        } else sb_trace_log("event=artwork_fallback id=%s state=skipped reason=privacy_or_url_policy",trace.id);
+    }
 	if (result.status != 200)
 		goto send;
 	png = read_png(output, &png_size);
 	if (!png) {
-		result.status = 503;
+		result.status = external ? local_status : 503;
+        result.fallback_failed=external;
 		goto send;
 	}
 	if (cache)
 		cache_publish(directory, target, png, png_size);
 send:
 	result.size = png ? (unsigned)png_size : 0;
-    sb_trace_log("event=image_result id=%s status=%u cache=%u input_bytes=%zu output_bytes=%u",trace.id,result.status,result.cached,body_size,result.size);
+    sb_trace_log("event=image_result id=%s status=%u cache=%u input_bytes=%zu output_bytes=%u source=%s",trace.id,result.status,result.cached,body_size,result.size,result.cached ? "cache" : external ? "external_fallback" : "local");
     sb_trace_end(&trace,(int)result.status,result.size,result.status>=400 ? "image fetch or decode failed" : NULL);
 	if (write_all(pipe_fd, &result, sizeof result) && png)
 		write_all(pipe_fd, png, png_size);
@@ -908,6 +1030,8 @@ int image_render_handle(struct mg_connection *c, struct mg_http_message *m)
 			return 1;
 		}
 	} else {
+        job.fallback_suppressed=0;
+        for (unsigned i=0;i<16;i++) if (fallback_backoff[i].until>mg_millis() && !strcmp(fallback_backoff[i].key,key)) job.fallback_suppressed=1;
 		int pipes[2];
 		job.data = malloc(PNG_LIMIT + sizeof(Result));
 		if (!job.data) {
@@ -999,7 +1123,12 @@ void image_render_tick(struct mg_mgr *mgr)
 {
 	if (!job.pid)
 		return;
-	int ended = 0, timed_out = mg_millis() >= job.deadline;
+    unsigned live=0;
+    for (unsigned i=0;i<job.clients_count;i++)
+        for (struct mg_connection *c=mgr->conns;c;c=c->next)
+            if (c->id==job.clients[i] && !c->is_closing) live++;
+    int ended = 0, timed_out = mg_millis() >= job.deadline;
+    if (!live) { kill(-job.pid,SIGKILL);ended=1; }
 	for (unsigned i = 0;
 	     i < 16 && job.received < PNG_LIMIT + sizeof(Result);
 	     i++) {
@@ -1027,13 +1156,18 @@ void image_render_tick(struct mg_mgr *mgr)
 	int status;
 	if (waitpid(job.pid, &status, WNOHANG) == 0)
 		return;
-	Result result = {timed_out ? 504u : 503u, 0, 0};
+	Result result = {timed_out ? 504u : 503u, 0, 0, 0};
 	if (!timed_out && job.received >= sizeof result) {
 		memcpy(&result, job.data, sizeof result);
 		if (result.size > PNG_LIMIT ||
 		    job.received != sizeof result + result.size)
 			result.status = 503;
 	}
+    if (result.fallback_failed || timed_out) {
+        unsigned i=fallback_backoff_next++%16;
+        snprintf(fallback_backoff[i].key,sizeof fallback_backoff[i].key,"%s",job.key);
+        fallback_backoff[i].until=mg_millis()+60000;
+    }
 	if (result.status != 200 && !timed_out)
 		fprintf(stderr,
 			"[svg-image] job failed status=%u\n",
