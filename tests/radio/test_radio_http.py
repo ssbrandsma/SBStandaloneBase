@@ -51,6 +51,42 @@ def main():
             assert call(base,"/api/radio/stream-test","POST",{"url":"http://example.org"})[0]==501
             status,raw,_=call(base,"/api/radio/stations/second","DELETE",{"expectedRevision":3}); assert status==200 and json.loads(raw)["revision"]==4
             saved=json.loads((root/"radio"/"stations.json").read_text()); assert "storageAvailable" not in saved and saved["revision"]==4
+            assert saved['stations'][0]['type']=='station'  # Legacy/default remains playable.
+            unknown={**station,'expectedRevision':4,'name':'Unknown','type':'invalid','order':30}
+            assert call(base,'/api/radio/stations','POST',unknown)[0]==400
+            directory={**station,'expectedRevision':4,'name':'My Directory','type':'opml','streamUrl':'https://example.org/directory.opml?query=one&v=2','codec':'bogus','order':30,'logoFile':logo['logoFile']}
+            for bad in ['ftp://example.org/test.opml','file:///etc/passwd','http://','http://?x=1','http://example.org:bad/a','http://example.org/a b']:
+                assert call(base,'/api/radio/stations','POST',directory|{'streamUrl':bad})[0]==400,bad
+            status,raw,_=call(base,'/api/radio/stations','POST',directory);cfg=json.loads(raw)
+            assert status==200 and cfg['revision']==5,(status,raw)
+            item=next(x for x in cfg['stations'] if x['type']=='opml');directory_id=item['id']
+            assert item['codec']=='auto' and item['logoFile']==logo['logoFile'] and item['streamUrl']==directory['streamUrl']
+            status,raw,_=call(base,'/api/radio/stations/'+directory_id,'PUT',item|{'expectedRevision':5,'name':'Edited Directory','enabled':False})
+            cfg=json.loads(raw);assert status==200 and cfg['revision']==6
+            ids=[directory_id,'r-dio-paradise']
+            status,raw,_=call(base,'/api/radio/stations/reorder','POST',{'expectedRevision':6,'ids':ids});cfg=json.loads(raw)
+            cfg['stations'].sort(key=lambda x:x['order'])
+            assert status==200 and [x['id'] for x in cfg['stations']]==ids
+            assert cfg['stations'][0]['type']=='opml' and not cfg['stations'][0]['enabled']
+            assert b'order,type' in call(base,'/api/radio/export?format=csv')[1]
+            # Restart the actual service against the saved station collection.
+            p.terminate();p.wait(timeout=3)
+            p=subprocess.Popen([exe,'--port',str(port),'--web-root',web,'--config-dir',str(root/'web')],env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            for _ in range(50):
+                try: socket.create_connection(('127.0.0.1',port),.1).close();break
+                except OSError:time.sleep(.05)
+            cap=(root/'web'/'remote.capability').read_text().strip()
+            status,raw,_=call(base,'/api/internal/web-access/start','POST',b'',token=False,headers={'X-Remote-Capability':cap});pin=json.loads(raw)['pin']
+            status,raw,h=call(base,'/api/auth/pair','POST',{'pin':pin},token=False);COOKIE=h['Set-Cookie'].split(';',1)[0]
+            status,raw,_=call(base,'/api/radio/stations');cfg=json.loads(raw)
+            cfg['stations'].sort(key=lambda x:x['order'])
+            assert status==200 and cfg['stations'][0]['type']=='opml' and cfg['stations'][0]['name']=='Edited Directory'
+            item=cfg['stations'][0]
+            status,raw,_=call(base,'/api/radio/stations/'+directory_id,'PUT',item|{'expectedRevision':cfg['revision'],'enabled':True})
+            cfg=json.loads(raw);assert status==200 and next(x for x in cfg['stations'] if x['id']==directory_id)['enabled']
+            status,raw,_=call(base,'/api/radio/stations/'+directory_id,'DELETE',{'expectedRevision':cfg['revision']})
+            assert status==200 and len(json.loads(raw)['stations'])==1
+
         finally:
             p.terminate(); p.wait(timeout=3)
     print("radio management integration tests passed")

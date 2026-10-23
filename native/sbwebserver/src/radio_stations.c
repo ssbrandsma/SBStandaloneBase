@@ -30,7 +30,7 @@
 
 typedef struct {
 	char id[65], name[257], description[1025], stream[8193], logo_url[4097],
-		logo_file[129], codec[8];
+		logo_file[129], codec[8], type[8];
 	int enabled, order;
 } Station;
 
@@ -220,6 +220,24 @@ static int valid_url(const char *s, int optional)
 		return optional;
 	return (!strncmp(s, "http://", 7) && s[7]) ||
 	       (!strncmp(s, "https://", 8) && s[8]);
+}
+
+/* Validate OPML locations without contacting them. The Lua transport supports
+ * DNS/IPv4 authorities and optional ordinary numeric ports, not local files. */
+static int valid_opml_url(const char *s) {
+    if (!valid_url(s,0) || strlen(s)>4096) return 0;
+    for (const unsigned char *p=(const unsigned char *)s;*p;p++) if (*p<=32 || *p==127 || *p=='#' || *p=='\\') return 0;
+    const char *host=s+(!strncmp(s,"https://",8) ? 8 : 7);
+    size_t len=strcspn(host,"/?");if (!len) return 0;
+    const char *colon=memchr(host,':',len);size_t hostlen=colon ? (size_t)(colon-host) : len;
+    if (!hostlen) return 0;
+    for (size_t i=0;i<hostlen;i++) if (!isalnum((unsigned char)host[i]) && host[i]!='.' && host[i]!='-' && host[i]!='_') return 0;
+    if (colon) {
+        unsigned port=0;size_t size=len-hostlen-1;if (!size || size>5) return 0;
+        for (size_t i=1;i<=size;i++) { if (!isdigit((unsigned char)colon[i])) return 0;port=port*10+(unsigned)(colon[i]-'0'); }
+        if (!port || port>65535) return 0;
+    }
+    return 1;
 }
 
 /**
@@ -567,8 +585,11 @@ static int parse_config(struct mg_str j, Config *c, char *e, size_t en)
 			  0,
 			  e,
 			  en) ||
-		    field(o, "codec", x->codec, sizeof x->codec, 0, e, en))
+		    field(o, "codec", x->codec, sizeof x->codec, 0, e, en) ||
+            field(o,"type",x->type,sizeof x->type,0,e,en))
 			goto bad;
+        if (!x->type[0]) strcpy(x->type,"station");
+        if (!strcmp(x->type,"opml")) strcpy(x->codec,"auto");
 		if (!x->codec[0])
 			strcpy(x->codec, "auto");
 		if (!mg_json_get_bool(o, "$.enabled", &enabled) ||
@@ -584,6 +605,8 @@ static int parse_config(struct mg_str j, Config *c, char *e, size_t en)
 		x->order = (int)order;
 		if (!safe_component(x->id, 64) || strchr(x->id, '.') ||
 		    !x->name[0] || !valid_url(x->stream, 0) ||
+            (strcmp(x->type,"station") && strcmp(x->type,"opml")) ||
+            (!strcmp(x->type,"opml") && !valid_opml_url(x->stream)) ||
 		    !valid_url(x->logo_url, 1) ||
 		    (x->logo_file[0] && !safe_component(x->logo_file, 128)) ||
 		    (strcmp(x->codec, "auto") && strcmp(x->codec, "mp3") &&
@@ -728,6 +751,7 @@ static void write_cfg(FILE *f, const Config *c)
 		fputs(i ? ",\n    {" : "\n    {", f);
 		fputs("\n      \"id\": ", f);
 		js(f, x->id);
+        fputs(",\n      \"type\": ", f); js(f,x->type);
 		fputs(",\n      \"name\": ", f);
 		js(f, x->name);
 		fputs(",\n      \"description\": ", f);
@@ -890,10 +914,13 @@ body_station(struct mg_str b, Station *x, int partial, char *e, size_t en)
 	    field(b, "streamUrl", x->stream, sizeof x->stream, 1, e, en) ||
 	    field(b, "logoUrl", x->logo_url, sizeof x->logo_url, 0, e, en) ||
 	    field(b, "logoFile", x->logo_file, sizeof x->logo_file, 0, e, en) ||
-	    field(b, "codec", x->codec, sizeof x->codec, 0, e, en))
+	    field(b, "codec", x->codec, sizeof x->codec, 0, e, en) ||
+        field(b,"type",x->type,sizeof x->type,0,e,en))
 		return -1;
 	bool enabled;
 	double order;
+	if (!x->type[0]) strcpy(x->type,"station");
+        if (!strcmp(x->type,"opml")) strcpy(x->codec,"auto");
 	if (!x->codec[0])
 		strcpy(x->codec, "auto");
 	if (!mg_json_get_bool(b, "$.enabled", &enabled))
@@ -902,6 +929,8 @@ body_station(struct mg_str b, Station *x, int partial, char *e, size_t en)
 	if (mg_json_get_num(b, "$.order", &order) && order == (int)order)
 		x->order = (int)order;
 	if (!x->name[0] || !valid_url(x->stream, 0) ||
+            (strcmp(x->type,"station") && strcmp(x->type,"opml")) ||
+            (!strcmp(x->type,"opml") && !valid_opml_url(x->stream)) ||
 	    !valid_url(x->logo_url, 1) ||
 	    (x->logo_file[0] && !safe_component(x->logo_file, 128)) ||
 	    (strcmp(x->codec, "auto") && strcmp(x->codec, "mp3") &&
@@ -1075,7 +1104,7 @@ static void export_csv(struct mg_connection *c, Config *cfg)
 		return;
 	}
 	fputs("id,name,description,streamUrl,logoUrl,logoFile,codec,enabled,"
-	      "order\n",
+	      "order,type\n",
 	      f);
 	for (int i = 0; i < cfg->count; i++) {
 		Station *x = &cfg->stations[i];
@@ -1091,7 +1120,7 @@ static void export_csv(struct mg_connection *c, Config *cfg)
 				fputc(',', f);
 			csvq(f, v[k]);
 		}
-		fprintf(f, ",%s,%d\n", x->enabled ? "true" : "false", x->order);
+		fprintf(f, ",%s,%d,%s\n", x->enabled ? "true" : "false", x->order,x->type);
 	}
 	fflush(f);
 	fseek(f, 0, SEEK_END);
@@ -1467,7 +1496,7 @@ int radio_handle(struct mg_connection *c, struct mg_http_message *m)
 		goto done;
 	}
 	if (!memcmp(m->uri.buf, "/api/radio/stations/", 20) &&
-	    m->uri.len > 20) {
+	    m->uri.len > 20 && !(exact(m->uri,"/api/radio/stations/reorder") && exact(m->method,"POST"))) {
 		size_t n = m->uri.len - 20;
 		if (n >= sizeof id)
 			n = sizeof id - 1;

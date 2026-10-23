@@ -1,6 +1,6 @@
 {
   "catalog_version": "1",
-  "standalone_base_version": "0.6.0",
+  "standalone_base_version": "0.6.1",
   "server": {
     "name": "Standalone Base",
     "uuid": "9d989f40-499a-4b85-b92f-8dc415af2a04",
@@ -15,26 +15,26 @@
     {
       "name": "StandaloneBase",
       "title": "Standalone Base",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "target": "baby",
       "min_target_version": "7.7.2",
-      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.6.0.zip",
-      "sha": "49b310ff9ad7d91340a042c5a503697552f4b933",
+      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.6.1.zip",
+      "sha": "157b4d27105dcf059cd15a43c3dbec601ac2e8c4",
       "desc": "Local LMS-compatible infrastructure services for Squeezebox Radio.",
-      "changes": "Fix HTTPS playback with RSA-4096 certificates; add safe TLS diagnostics, bounded artwork fallback, progressive JPEG support and artwork URL normalization.",
+      "changes": "Manage OPML directories alongside custom radio stations, with type-aware editing, URL validation, ordering and JSON/CSV import and export.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     },
     {
       "name": "StandaloneRadio",
       "title": "Standalone Radio",
-      "version": "0.9.12",
+      "version": "0.9.13",
       "target": "baby",
       "min_target_version": "7.7",
-      "url": "http://49.12.198.91/sbstandalone/StandaloneRadio-0.9.12.zip",
-      "sha": "198f709b5912a8afede06627b384fe2dbd7f849f",
+      "url": "http://49.12.198.91/sbstandalone/StandaloneRadio-0.9.13.zip",
+      "sha": "d293a06fe201046001cd391d065c4f7f2ca7eedf",
       "desc": "Standalone internet radio playback for Logitech Squeezebox Radio.",
-      "changes": "Separate shared OPML transport and parsing from provider-specific behavior; preserve RadioFeeds and TuneIn browsing, playback and presets.",
+      "changes": "Add custom OPML directories and fix HTTP-to-HTTPS playlist redirects with bounded request cleanup and HLS playback.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     },

@@ -55,3 +55,26 @@ The future Standalone Radio applet should read `stations.json` when its station 
 ## Build and deployment
 
 Build `sbwebserver` through the normal ARM package build so `radio_stations.c` is linked. Host builds can use the environment overrides above. Package creation includes the existing web assets automatically. No deployment or Radio restart is performed by this change.
+
+## OPML directories
+
+The existing Add/Edit Station form now has a Type selector: Radio station
+(default) or OPML directory. Directories use OPML URL instead of Stream URL
+and hide Codec hint; logos, description, order, enable/disable, edit, delete,
+import/export and atomic persistence remain shared.
+
+The existing JSON station objects accept optional `type`: `station` or `opml`.
+Missing type means station; unknown types are rejected. `streamUrl` remains the
+URL field. OPML URLs must be HTTP(S), at most 4096 bytes, with no whitespace,
+fragment, userinfo or IPv6 literal. Saving does not fetch the directory.
+Directories persist codec `auto`. CSV supports an optional trailing `type`
+column; old CSV files still import as stations. Mixed entries use the same
+revision checks, ordering and logos. POST `/api/radio/stations/reorder` handles
+both types.
+
+Base and Radio use `/mnt/sbdata/config/radio/stations.json` only while the
+Extended Storage `sbubifs` mount is active; otherwise they use
+`/mnt/storage/standalonebase/radio/stations.json`. Logos use the adjacent
+`logos/` directory. Radio reloads when the revision or active path changes.
+Directories are browsed lazily by Radio's existing shared OPML navigator;
+Base introduces no new HTTP proxy, image decoder or background process.
