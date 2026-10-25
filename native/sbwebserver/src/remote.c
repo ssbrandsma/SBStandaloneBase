@@ -10,6 +10,7 @@
 #include "remote.h"
 #include "remote_framebuffer.h"
 #include "auth.h"
+#include "firmware.h"
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -468,6 +469,11 @@ static int valid_source(const char *s)
 static void
 handle_input(struct mg_connection *c, struct mg_http_message *m, int readonly)
 {
+	if (firmware_remote_locked()) {
+		R.qread = R.qwrite;
+		json_error(c, 423, "Remote controls are locked for physical firmware authorization");
+		return;
+	}
 	char id[49], control[20], phase[12];
 	double seqd = 0;
 	Lease *l;
@@ -693,6 +699,8 @@ static void status(struct mg_connection *c)
  */
 static void actions(struct mg_connection *c)
 {
+	if (firmware_remote_locked())
+		R.qread = R.qwrite;
 	char b[4096];
 	int protected = auth_pairing_protected();
 	size_t n = (size_t)snprintf(b,

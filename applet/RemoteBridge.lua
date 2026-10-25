@@ -5,7 +5,8 @@ local Timer = require("jive.ui.Timer")
 local SocketHttp = require("jive.net.SocketHttp")
 local RequestHttp = require("jive.net.RequestHttp")
 local Surface = require("jive.ui.Surface")
-local io, os, tonumber, tostring, pcall = io, os, tonumber, tostring, pcall
+local json = require("json")
+local io, os, tonumber, tostring, pcall, pairs = io, os, tonumber, tostring, pcall, pairs
 local jnt = jnt
 module(..., Framework.constants)
 oo.class(_M)
@@ -99,12 +100,30 @@ function response(self,data,err)
         local control,phase=line:match("^([@%w_]+)\t([%w_]+)")
         if control=="@bmp" then wantBmp=phase=="1"
         elseif control=="@protected" then protected=phase=="1"
-        elseif control and phase then injecting=true; untrustedUntil=Framework:getTicks()+1000; dispatch(control,phase); injecting=false end
+        elseif control and phase and not self.firmwareLock then injecting=true; untrustedUntil=Framework:getTicks()+1000; dispatch(control,phase); injecting=false end
     end
     if protected then os.remove(BMP); os.remove(BMP..".tmp")
     elseif wantBmp and Framework:getTicks()-self.lastBmp>=750 then self:capture() end
 end
 function isInjecting(self) return injecting or Framework:getTicks()<untrustedUntil end
+function firmware(self,command,payload,callback)
+    local capability=readOne(CAPABILITY)
+    if not capability then callback(nil,"Internal capability unavailable"); return end
+    self.firmwareHttp=self.firmwareHttp or {}
+    if self.firmwareHttp[command] then self.firmwareHttp[command]:close("Replaced firmware request") end
+    local http=SocketHttp(jnt,"127.0.0.1",webPort(),"StandaloneBaseFirmware")
+    self.firmwareHttp[command]=http
+    local body=json.encode(payload)
+    local sent,delivered=false,false
+    local request=RequestHttp(function(data,err)
+        if delivered or (not data and not err) then return end
+        delivered=true; callback(data,err)
+    end,"POST","/api/internal/firmware/"..command,{
+        headers={Connection="close",["Content-Type"]="application/json",["Content-Length"]=tostring(#body),["X-Remote-Capability"]=capability},
+        t_bodySource=function() if not sent then sent=true; return body end end})
+    local ok=pcall(function() http:fetch(request) end)
+    if not ok then callback(nil,"Internal firmware request failed") end
+end
 function tick(self)
     local active=io.open(ACTIVE,"r")
     if not active then return end
@@ -119,6 +138,10 @@ function tick(self)
 end
 function stop(self)
     if self.timer then self.timer:stop(); self.timer=nil end
+    for _, http in pairs(self.firmwareHttp or {}) do
+        pcall(function() http:close("Standalone Base stopped") end)
+    end
+    self.firmwareHttp = nil
     self.http=nil; self.busy=false
     self.internalHttp=nil
     os.remove(BMP); os.remove(BMP..".tmp")

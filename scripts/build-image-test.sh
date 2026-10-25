@@ -9,5 +9,5 @@ gcc -O2 -std=c99 -Wall -Wextra -I native/svgpngrenderer/third_party -I "$p/inclu
 if [ "${1:-}" = --renderer-only ]; then exit 0; fi
 gcc -O2 -std=c99 -Wall -Wextra -pthread -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L \
   -DMG_ENABLE_EPOLL=0 -DMG_ENABLE_POLL=1 -DMG_ENABLE_DIRLIST=0 -DMG_ENABLE_SSI=0 \
-  -DSB_IMAGE_TESTING -I native/sbwebserver/src -I native/sbwebserver/third_party \
-  native/sbwebserver/src/*.c native/sbwebserver/third_party/mongoose.c -o build-image-host/sbwebserver-test
+  -DSB_IMAGE_TESTING -I native/sbwebserver/src -I native/sbwebserver/third_party -I "$p/include" \
+  native/sbwebserver/src/*.c native/sbwebserver/third_party/mongoose.c "$p/lib/libz.a" -o build-image-host/sbwebserver-test

@@ -10,6 +10,7 @@
 
 #include "sbbase.h"
 #include "nowplaying.h"
+#include "../../common/firmware_state.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -66,6 +67,12 @@ static np_manager *nowplaying;
 static char player_id[18];
 
 static client *clients;
+
+typedef struct {
+	char client_id[32], channel[160], version[64], machine[16], last[512];
+	time_t seen;
+} firmware_subscription;
+static firmware_subscription firmware_subscriptions[CLIENTS];
 
 static char catalog_data[16384] = "{\"count\":0,\"item_loop\":[]}";
 
@@ -406,6 +413,82 @@ static void register_playerstatus(const char *path)
 			cid);
 }
 
+/** Construct the exact optional firmware result, gated by private device state. */
+static void firmware_payload(const char *version, const char *machine,
+			     char *out, size_t capacity)
+{
+	char url[256], installed[64];
+	if (!strcmp(machine, "baby") && sb_firmware_state(url, installed) &&
+	    !strcmp(version, installed))
+		snprintf(out, capacity, "{\"firmwareUrl\":\"%s\",\"firmwareUpgrade\":0}", url);
+	else
+		snprintf(out, capacity, "{\"firmwareUpgrade\":0}");
+}
+
+/** Extract one literal command parameter; escaped/oversized values fail closed. */
+static void firmware_parameter(const char *message, const char *end, const char *name,
+			       char *out, size_t capacity)
+{
+	out[0] = 0;
+	const char *p = strstr(message, name);
+	if (!p || p >= end) return;
+	p += strlen(name);
+	size_t length = strcspn(p, "\"\\\r\n");
+	if (!length || length >= capacity || p + length >= end || p[length] != '"') return;
+	memcpy(out, p, length);
+	out[length] = 0;
+}
+
+/** Register one bounded logical firmware subscription, independent of TCP fd. */
+static void firmware_subscribe(const char *path, const char *version,
+			       const char *machine, const char *payload)
+{
+	if (path[0] != '/' || strlen(path) >= 160) return;
+	const char *slash = strchr(path + 1, '/');
+	if (!slash || strcmp(slash, "/slim/firmwarestatus")) return;
+	size_t length = (size_t)(slash - path - 1);
+	if (!length || length >= 32) return;
+	for (const char *p = path + 1; p < slash; p++)
+		if (!isalnum((unsigned char)*p) && *p != '-') return;
+	firmware_subscription *slot = NULL;
+	for (unsigned i = 0; i < CLIENTS; i++) {
+		firmware_subscription *s = &firmware_subscriptions[i];
+		if (strlen(s->client_id) == length && !memcmp(s->client_id, path + 1, length)) {
+			slot = s; break;
+		}
+		if (!s->client_id[0] || time(NULL) - s->seen > HTTP_IDLE_SECONDS) slot = s;
+	}
+	if (!slot) return;
+	memcpy(slot->client_id, path + 1, length);
+	slot->client_id[length] = 0;
+	snprintf(slot->channel, sizeof slot->channel, "%s", path);
+	snprintf(slot->version, sizeof slot->version, "%s", version);
+	snprintf(slot->machine, sizeof slot->machine, "%s", machine);
+	snprintf(slot->last, sizeof slot->last, "%.511s", payload);
+	slot->seen = time(NULL);
+}
+
+/** Deliver changed firmware status only, preserving ordinary Comet traffic. */
+static void firmware_publish(const char *reconnected)
+{
+	for (unsigned i = 0; i < CLIENTS; i++) {
+		firmware_subscription *s = &firmware_subscriptions[i];
+		if (!s->client_id[0]) continue;
+		client *stream = stream_for_id(s->client_id);
+		if (!stream) {
+			if (time(NULL) - s->seen > HTTP_IDLE_SECONDS) memset(s, 0, sizeof *s);
+			continue;
+		}
+		s->seen = time(NULL);
+		char payload[512], event[768];
+		firmware_payload(s->version, s->machine, payload, sizeof payload);
+		if ((!reconnected || strcmp(reconnected, s->client_id)) && !strcmp(payload, s->last)) continue;
+		snprintf(event, sizeof event, "[{\"channel\":\"%s\",\"data\":%s}]", s->channel, payload);
+		stream_event(stream, event);
+		strcpy(s->last, payload);
+	}
+}
+
 /**
  * @brief Handle unregister playerstatus.
  * @param body Input text for body.
@@ -414,8 +497,12 @@ static void unregister_playerstatus(const char *body)
 {
 	char path[160], cid[32], requested[18];
 	client *stream;
-	if (!json_string(body, "\"unsubscribe\"", path, sizeof path) ||
-	    !split_playerstatus_path(
+	if (!json_string(body, "\"unsubscribe\"", path, sizeof path))
+		return;
+	for (unsigned i = 0; i < CLIENTS; i++)
+		if (!strcmp(firmware_subscriptions[i].channel, path))
+			memset(&firmware_subscriptions[i], 0, sizeof firmware_subscriptions[i]);
+	if (!split_playerstatus_path(
 		    path, cid, sizeof cid, requested, sizeof requested))
 		return;
 	stream = stream_for_id(cid);
@@ -915,10 +1002,14 @@ request_responses(const char *body, const sb_config *cfg, char *out, size_t cap)
 				 player_id[0] ? 1 : 0,
 				 player_id[0] ? "PLAYER" : "[]");
 
-		else if (before(p, "firmwareupgrade", next))
-			strcpy(data,
-			       "{\"firmwareupgrade\":0,\"player_needs_"
-			       "upgrade\":0,\"player_is_upgrading\":0}");
+		else if (before(p, "firmwareupgrade", next)) {
+			char version[64], machine[16];
+			firmware_parameter(p, next, "firmwareVersion:", version, sizeof version);
+			firmware_parameter(p, next, "machine:", machine, sizeof machine);
+			firmware_payload(version, machine, data, sizeof data);
+			if (before(p, "subscribe:0", next))
+				firmware_subscribe(reply, version, machine, data);
+		}
 
 		else if (before(p, "\"date\"", next))
 			snprintf(data,
@@ -1285,8 +1376,12 @@ static void handle_http(client *c, const sb_config *cfg)
 		 * leave SqueezePlay displaying stale metadata. */
 		if (c->fd >= 0 && c->playerstatus_subscribed)
 			publish_playerstatus();
+		firmware_publish(cid);
 		return;
 	} else if (strstr(channel, "/meta/disconnect")) {
+		for (unsigned n = 0; n < CLIENTS; n++)
+			if (!strcmp(firmware_subscriptions[n].client_id, cid))
+				memset(&firmware_subscriptions[n], 0, sizeof firmware_subscriptions[n]);
 		keep_response = 0;
 		snprintf(response,
 			 sizeof response,
@@ -1528,6 +1623,7 @@ int main(int argc, char **argv)
 
 		if (np_expire(nowplaying))
 			publish_playerstatus();
+		firmware_publish(NULL);
 
 		if (pf[0].revents & POLLIN) {
 			unsigned char in[SB_MAX_DISCOVERY + 1], out[1024];

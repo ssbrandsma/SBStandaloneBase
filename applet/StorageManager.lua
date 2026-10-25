@@ -83,6 +83,10 @@ function Manager:startRecovery(progressCallback, doneCallback)
     return self:_startOperation("recover", progressCallback, doneCallback)
 end
 
+function Manager:startRepair(progressCallback, doneCallback)
+    return self:_startOperation("repair", progressCallback, doneCallback)
+end
+
 function Manager:startReinitialization(progressCallback, doneCallback)
     return self:_startOperation("reinitialize --confirm-erase-sbdata " ..
         self.root .. "/sbubifs-authorized.ko", progressCallback, doneCallback)

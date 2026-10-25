@@ -45,7 +45,8 @@ function M.apply(installer, options)
         local bound = false
         for line in mounts:lines() do
             local device, path, kind = line:match("^(%S+)%s+(%S+)%s+(%S+)")
-            if path == ACTIVE and kind == "sbubifs" then bound = true end
+            if path == ACTIVE and (kind == "sbubifs" or kind == "ubifs")
+                and (device == "ubi0:sbdata" or device == "/dev/ubi0_5") then bound = true end
         end
         mounts:close()
         if bound and fs.attributes(ACTIVE .. "/SetupAppletInstaller", "mode") == "directory" then

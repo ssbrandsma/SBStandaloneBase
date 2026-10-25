@@ -6,7 +6,7 @@ module(...)
 oo.class(_M, AppletMeta)
 
 function jiveVersion(meta) return 1, 1 end
-function defaultSettings(meta) return { enabled = true } end
+function defaultSettings(meta) return { enabled = true, customFirmwareUpdates = false } end
 function registerApplet(meta)
     meta:registerService("getStandaloneStorageInfo")
     meta:registerService("getStandaloneStorageCompatibility")

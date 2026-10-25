@@ -1,6 +1,6 @@
 {
   "catalog_version": "1",
-  "standalone_base_version": "0.6.1",
+  "standalone_base_version": "0.6.2",
   "server": {
     "name": "Standalone Base",
     "uuid": "9d989f40-499a-4b85-b92f-8dc415af2a04",
@@ -15,13 +15,13 @@
     {
       "name": "StandaloneBase",
       "title": "Standalone Base",
-      "version": "0.6.1",
+      "version": "0.6.2",
       "target": "baby",
       "min_target_version": "7.7.2",
-      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.6.1.zip",
-      "sha": "157b4d27105dcf059cd15a43c3dbec601ac2e8c4",
+      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.6.2.zip",
+      "sha": "8b55e02be102c63c76980ea9b863d3870d6faf38",
       "desc": "Local LMS-compatible infrastructure services for Squeezebox Radio.",
-      "changes": "Manage OPML directories alongside custom radio stations, with type-aware editing, URL validation, ordering and JSON/CSV import and export.",
+      "changes": "Add physically authorized firmware preparation, paced browser uploads, SHA-1/SHA-256 validation and retained non-destructive Extended Storage recovery.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     },

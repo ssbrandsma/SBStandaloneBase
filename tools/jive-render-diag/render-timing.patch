@@ -1,0 +1,257 @@
+diff --git a/src/squeezeplay/Makefile.am b/src/squeezeplay/Makefile.am
+index 0277976..e21a2f7 100644
+--- a/src/squeezeplay/Makefile.am
++++ b/src/squeezeplay/Makefile.am
+@@ -165,6 +165,7 @@ libui_la_SOURCES = \
+ 	src/ui/jive_event.c \
+ 	src/ui/jive_font.c \
+ 	src/ui/jive_framework.c \
++	src/ui/jive_render_diag.c \
+ 	src/ui/jive_group.c \
+ 	src/ui/jive_icon.c \
+ 	src/ui/jive_label.c \
+@@ -182,7 +183,7 @@ libui_la_SOURCES = \
+ 	src/ui/jive_window.c \
+ 	src/ui/lua_jiveui.c
+ 
+-libui_la_LIBADD = -ltolua++ -llua -lSDL_image -lSDL_ttf -lSDL_gfx -lSDL
++libui_la_LIBADD = -ltolua++ -llua -lSDL_image -lSDL_ttf -lSDL_gfx -lSDL -lrt
+ 
+ libaudio_la_CFLAGS = -DRESAMPLE_EFFECTS -DOUTSIDE_SPEEX -DFIXED_POINT -DRANDOM_PREFIX=jive -DEXPORT=""
+ 
+diff --git a/src/squeezeplay/src/ui/jive_framework.c b/src/squeezeplay/src/ui/jive_framework.c
+index eaff051..1906f40 100644
+--- a/src/squeezeplay/src/ui/jive_framework.c
++++ b/src/squeezeplay/src/ui/jive_framework.c
+@@ -6,6 +6,7 @@
+ 
+ #include "common.h"
+ #include "jive.h"
++#include "jive_render_diag.h"
+ 
+ #include <time.h>
+ 
+@@ -428,6 +429,7 @@ int jiveL_set_update_screen(lua_State *L) {
+ 
+ static int _draw_screen(lua_State *L) {
+ 	JiveSurface *srf;
++	struct jive_diag_stamp diag;
+ 	Uint32 t0 = 0, t1 = 0, t2 = 0, t3 = 0, t4 = 0;
+ 	clock_t c0 = 0, c1 = 0;
+ 	bool_t standalone_draw, drawn = false;
+@@ -460,6 +462,7 @@ static int _draw_screen(lua_State *L) {
+ 	}
+ 
+ 
++	diag = jive_diag_begin();
+ 	do {
+ 		jive_origin = next_jive_origin;
+ 
+@@ -472,7 +475,9 @@ static int _draw_screen(lua_State *L) {
+ 		/* check in case the origin changes during layout */
+ 	} while (jive_origin != next_jive_origin);
+ 
++	jive_diag_end(JIVE_DIAG_LAYOUT, diag);
+ 	if (perfwarn.screen) t1 = jive_jiffies();
++	diag = jive_diag_begin();
+  
+ 	/* Widget animations - don't update in a standalone draw as its not the main screen update */
+ 	if (!standalone_draw) {
+@@ -511,23 +516,28 @@ static int _draw_screen(lua_State *L) {
+ 		lua_pop(L, 1);
+ 	}
+ 
++	jive_diag_end(JIVE_DIAG_ANIMATION, diag);
+ 	if (perfwarn.screen) t2 = jive_jiffies();
+ 
+ 	/* Window transitions */
+ 	lua_getfield(L, 1, "transition");
+ 	if (!lua_isnil(L, -1)) {
+ 		/* Draw background */
++		diag = jive_diag_begin();
+ 		jive_surface_set_clip(srf, NULL);
+ 		jive_tile_set_alpha(jive_background, 0); // no alpha channel
+ 		jive_tile_blit(jive_background, srf, 0, 0, screen_w, screen_h);
++		jive_diag_end(JIVE_DIAG_BACKGROUND, diag);
+ 
+ 		if (perfwarn.screen) t3 = jive_jiffies();
+ 		
+ 		/* Animate screen transition */
++		diag = jive_diag_begin();
+ 		lua_pushvalue(L, -1);
+ 		lua_pushvalue(L, -3);  	// widget
+ 		lua_pushvalue(L, 2);	// surface
+ 		lua_call(L, 2, 0);
++		jive_diag_end(JIVE_DIAG_DRAW, diag);
+ 
+ 		drawn = true;
+ 	}
+@@ -546,17 +556,21 @@ static int _draw_screen(lua_State *L) {
+ #endif
+ 
+ 		/* Draw background */
++		diag = jive_diag_begin();
+ 		jive_tile_blit(jive_background, srf, 0, 0, screen_w, screen_h);
++		jive_diag_end(JIVE_DIAG_BACKGROUND, diag);
+ 
+ 		if (perfwarn.screen) t3 = jive_jiffies();
+ 
+ 		/* Draw screen */
++		diag = jive_diag_begin();
+ 		if (jive_getmethod(L, -2, "draw")) {
+ 			lua_pushvalue(L, -3);	// widget
+ 			lua_pushvalue(L, 2);	// surface
+ 			lua_pushinteger(L, JIVE_LAYER_ALL); // layer
+ 			lua_call(L, 3, 0);
+ 		}
++		jive_diag_end(JIVE_DIAG_DRAW, diag);
+ 
+ #if 0
+ 		// show the dirty region for debug purposes:
+@@ -654,6 +668,7 @@ int jiveL_update_screen(lua_State *L) {
+ 	if (lua_toboolean(L, -1)) {
+ 		jive_surface_flip(screen);
+ 	}
++	jive_diag_frame();
+ 
+ 	lua_pop(L, 2);
+ 
+diff --git a/src/squeezeplay/src/ui/jive_render_diag.c b/src/squeezeplay/src/ui/jive_render_diag.c
+new file mode 100644
+index 0000000..bab657a
+--- /dev/null
++++ b/src/squeezeplay/src/ui/jive_render_diag.c
+@@ -0,0 +1,75 @@
++/* Bounded aggregate measurements; no heap allocation, file creation or hooks.
++ * Calls must remain on the UI thread. stderr must be captured off-device or in
++ * a bounded RAM log, never streamed into flash. Log I/O is outside phase times.
++ */
++#include "jive_render_diag.h"
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++static int enabled = -1;
++static double origin, last_report;
++static unsigned long frames;
++static struct { unsigned long calls; double wall, cpu, max_wall; }
++ totals[JIVE_DIAG_PHASES];
++static const char *names[JIVE_DIAG_PHASES] = {
++ "layout", "animation", "background", "draw", "rotate", "flip"
++};
++static double seconds(struct timespec t) {
++ return (double)t.tv_sec + (double)t.tv_nsec / 1000000000.0;
++}
++static int read_clocks(struct jive_diag_stamp *s) {
++ s->valid = clock_gettime(CLOCK_MONOTONIC, &s->wall) == 0 &&
++            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &s->cpu) == 0;
++ if (!s->valid) {
++  enabled = 0;
++  fprintf(stderr, "JIVE_RENDER_DIAG disabled: clock unavailable\n");
++ }
++ return s->valid;
++}
++struct jive_diag_stamp jive_diag_begin(void) {
++ struct jive_diag_stamp s;
++ memset(&s, 0, sizeof(s));
++ if (enabled == -1) {
++  const char *value = getenv("JIVE_RENDER_DIAG");
++  enabled = value && strcmp(value, "1") == 0;
++  if (enabled && read_clocks(&s)) {
++   origin = last_report = seconds(s.wall);
++  }
++ }
++ if (enabled) read_clocks(&s);
++ return s;
++}
++void jive_diag_end(enum jive_diag_phase phase, struct jive_diag_stamp start) {
++ struct jive_diag_stamp end;
++ double wall;
++ if (!enabled || !start.valid || !read_clocks(&end)) return;
++ wall = seconds(end.wall) - seconds(start.wall);
++ totals[phase].calls++;
++ totals[phase].wall += wall;
++ totals[phase].cpu += seconds(end.cpu) - seconds(start.cpu);
++ if (wall > totals[phase].max_wall) totals[phase].max_wall = wall;
++}
++void jive_diag_frame(void) {
++ struct jive_diag_stamp now;
++ double elapsed;
++ int i;
++ if (enabled != 1 || !read_clocks(&now)) return;
++ frames++;
++ elapsed = seconds(now.wall) - last_report;
++ if (elapsed < 5.0) return;
++ fprintf(stderr, "JIVE_RENDER_DIAG interval_s=%.3f age_s=%.3f frames=%lu\n",
++         elapsed, seconds(now.wall) - origin, frames);
++ for (i = 0; i < JIVE_DIAG_PHASES; i++) {
++  fprintf(stderr, "JIVE_RENDER_DIAG phase=%s calls=%lu wall_ms=%.3f cpu_ms=%.3f max_wall_ms=%.3f\n",
++          names[i], totals[i].calls, totals[i].wall * 1000.0,
++          totals[i].cpu * 1000.0, totals[i].max_wall * 1000.0);
++ }
++ memset(totals, 0, sizeof(totals));
++ frames = 0;
++ last_report = seconds(now.wall);
++ if (seconds(now.wall) - origin >= 120.0) {
++  enabled = 0;
++  fprintf(stderr, "JIVE_RENDER_DIAG stopped: 120 second budget\n");
++ }
++}
+diff --git a/src/squeezeplay/src/ui/jive_render_diag.h b/src/squeezeplay/src/ui/jive_render_diag.h
+new file mode 100644
+index 0000000..25dfec3
+--- /dev/null
++++ b/src/squeezeplay/src/ui/jive_render_diag.h
+@@ -0,0 +1,13 @@
++/* Diagnostic-only, Linux UI thread. Enable with JIVE_RENDER_DIAG=1. */
++#ifndef JIVE_RENDER_DIAG_H
++#define JIVE_RENDER_DIAG_H
++#include <time.h>
++enum jive_diag_phase {
++ JIVE_DIAG_LAYOUT, JIVE_DIAG_ANIMATION, JIVE_DIAG_BACKGROUND,
++ JIVE_DIAG_DRAW, JIVE_DIAG_ROTATE, JIVE_DIAG_FLIP, JIVE_DIAG_PHASES
++};
++struct jive_diag_stamp { struct timespec wall, cpu; int valid; };
++struct jive_diag_stamp jive_diag_begin(void);
++void jive_diag_end(enum jive_diag_phase phase, struct jive_diag_stamp start);
++void jive_diag_frame(void);
++#endif
+diff --git a/src/squeezeplay/src/ui/jive_surface.c b/src/squeezeplay/src/ui/jive_surface.c
+index 399042f..2336398 100644
+--- a/src/squeezeplay/src/ui/jive_surface.c
++++ b/src/squeezeplay/src/ui/jive_surface.c
+@@ -6,6 +6,7 @@
+ 
+ #include "common.h"
+ #include "jive.h"
++#include "jive_render_diag.h"
+ 
+ #ifndef JIVE_NO_DISPLAY
+ 
+@@ -1190,8 +1191,10 @@ void jive_surface_get_clip_arg(JiveSurface *srf, Uint16 *x, Uint16 *y, Uint16 *w
+ }
+ 
+ void jive_surface_flip(JiveSurface *srf) {
++	struct jive_diag_stamp diag;
+ #ifdef SCREEN_ROTATION_ENABLED
+ 	int x, y;
++	diag = jive_diag_begin();
+ 
+ 	/* orientation hack */
+ 	SDL_LockSurface(real_sdl);
+@@ -1233,10 +1236,15 @@ void jive_surface_flip(JiveSurface *srf) {
+ 
+ 	SDL_UnlockSurface(srf->sdl);
+ 	SDL_UnlockSurface(real_sdl);
++	jive_diag_end(JIVE_DIAG_ROTATE, diag);
+ 
++	diag = jive_diag_begin();
+ 	SDL_Flip(real_sdl);
++	jive_diag_end(JIVE_DIAG_FLIP, diag);
+ #else
++	diag = jive_diag_begin();
+ 	SDL_Flip(srf->sdl);
++	jive_diag_end(JIVE_DIAG_FLIP, diag);
+ #endif
+ 
+ }

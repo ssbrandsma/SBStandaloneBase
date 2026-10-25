@@ -11,6 +11,7 @@ SBDATA_IMAGE=$APPLET_DIR/sbdata-empty.ubifs
 PERSIST_DIR=$ROOT/mnt/storage/standalonebase
 PERSIST_MODULE=$ROOT/mnt/storage/sbubifs-authorized.ko
 PERSIST_BOOT=$PERSIST_DIR/storage-boot.sh
+RETAINED_DIR=$ROOT/etc/standalonebase
 RCS_LOCAL=$ROOT/etc/init.d/rcS.local
 UBI_CLASS=$ROOT/sys/class/ubi
 UBI=$UBI_CLASS/ubi0
@@ -70,6 +71,28 @@ say() { printf '%s\n' "$*"; }
 value() { test -r "$1" && sed -n '1p' "$1" 2>/dev/null || true; }
 mounted_type() { awk -v target="$1" '$2 == target { print $3; exit }' "$MOUNTS" 2>/dev/null; }
 has_fs() { grep -q '^[[:space:]]*nodev[[:space:]]*sbubifs$' "$FILESYSTEMS" 2>/dev/null; }
+legacy_driver_supported() {
+    case $(value "$ROOT/etc/squeezeos.version") in
+        '7.7.2 r9663'|'7.7.3 r16676'|'9.0.1 r17084'|'9.0.2 r17146') ;;
+        *) return 1 ;;
+    esac
+    test "$(value "$ROOT/proc/sys/kernel/osrelease")" = 2.6.26.8-rt16 \
+        && grep -Eq 'Hardware[[:space:]]*:[[:space:]]*(Baby|Logitech MX25 Baby Board)' "$ROOT/proc/cpuinfo"
+}
+native_multi_ubifs() {
+    { test -d "$ROOT/sys/class/bdi/ubifs_0_2" &&
+        grep -q '^[[:space:]]*nodev[[:space:]]*ubifs$' "$FILESYSTEMS" 2>/dev/null; } ||
+        { test "$(mounted_type "$MOUNT")" = ubifs && volume_mounted_at "$MOUNT"; }
+}
+retained_boot_ready() {
+    test -x "$RETAINED_DIR/storage-boot.sh" && test -x "$RETAINED_DIR/sb-storage-helper" \
+        && test -L "$PERSIST_DIR" && test "$PERSIST_DIR" -ef "$RETAINED_DIR" \
+        && test -x "$RCS_LOCAL" && grep -q '/etc/standalonebase/storage-boot.sh' "$RCS_LOCAL"
+}
+volume_mounted_at() {
+    awk -v target="$1" '$2 == target && ($1 == "ubi0:sbdata" || $1 == "/dev/ubi0_5") &&
+        ($3 == "ubifs" || $3 == "sbubifs") {ok=1} END {exit !ok}' "$MOUNTS" 2>/dev/null
+}
 sbdata_is_mounted() {
     awk '$1 == "ubi0:sbdata" || $1 == "/dev/ubi0_5" { found=1 } END { exit found ? 0 : 1 }' "$MOUNTS" 2>/dev/null
 }
@@ -154,6 +177,10 @@ virgin_layout_exact() {
 # Existing-volume recovery is separate from initialization. In particular,
 # available free LEBs are irrelevant: no UBI allocation or image write occurs.
 recovery_eligible() {
+    # Native-capable firmware uses the repair-only path, never the module or
+    # legacy whole-tree migration transaction.
+    ! native_multi_ubifs || return 1
+    legacy_driver_supported || return 1
     exact_sbdata && test -z "$(mounted_type "$SOURCE")" \
         && test ! -f "$REBOOT_MARKER" \
         && test "$(mounted_type "$ROOT/mnt/storage")" = ubifs \
@@ -344,9 +371,9 @@ status_snapshot() {
     volume_type=$(value "$VOLUME/type")
     volume_corrupted=$(value "$VOLUME/corrupted")
     volume_update_marker=$(value "$VOLUME/upd_marker")
-    driver_loaded=0; has_fs && driver_loaded=1
-    sbdata_mounted=0; test "$(mounted_type "$MOUNT")" = sbubifs && sbdata_mounted=1
-    bind_active=0; test "$(mounted_type "$SOURCE")" = sbubifs && bind_active=1
+    driver_loaded=0; { has_fs || native_multi_ubifs; } && driver_loaded=1
+    sbdata_mounted=0; volume_mounted_at "$MOUNT" && sbdata_mounted=1
+    bind_active=0; volume_mounted_at "$SOURCE" && bind_active=1
     total=0; used=0; free=0
     if test "$sbdata_mounted" = 1 && command -v df >/dev/null 2>&1; then
         set -- $(df -k "$MOUNT" 2>/dev/null | awk 'NR==2 {print $2, $3, $4}')
@@ -370,6 +397,7 @@ status_snapshot() {
     elif exact_sbdata || virgin_layout_exact; then state=AVAILABLE
     fi
     if test "$state" = AVAILABLE \
+        && ! native_multi_ubifs && legacy_driver_supported \
         && test -x "$HELPER" \
         && "$HELPER" verify-module "$BUNDLED_MODULE" >/dev/null 2>&1 \
         && "$HELPER" verify-sbdata-image "$SBDATA_IMAGE" >/dev/null 2>&1 \
@@ -378,6 +406,11 @@ status_snapshot() {
         init_supported=1
         if exact_sbdata; then init_reason=validated_packaged_image
         else init_reason=validated_virgin_layout; fi
+    fi
+    erase_capable=$init_supported
+    if exact_sbdata; then
+        init_supported=0
+        init_reason=existing_volume_requires_repair_not_initialization
     fi
     say "STATUS=$state"
     say "PLATFORM=$platform"
@@ -400,6 +433,13 @@ status_snapshot() {
     say "SBDATA_IMAGE_PRESENT=$(test -f "$SBDATA_IMAGE" && echo 1 || echo 0)"
     say "SBDATA_IMAGE_VALID=$(test -x "$HELPER" && test -f "$SBDATA_IMAGE" && "$HELPER" verify-sbdata-image "$SBDATA_IMAGE" >/dev/null 2>&1 && echo 1 || echo 0)"
     say "DRIVER_LOADED=$driver_loaded"
+    say "NATIVE_MULTI_UBIFS=$(bool native_multi_ubifs)"
+    say "BOOT_SUPPORT_RETAINED=$(bool retained_boot_ready)"
+    repair_supported=0
+    if exact_sbdata && ! retained_boot_ready && { native_multi_ubifs || { legacy_driver_supported && volume_mounted_at "$MOUNT"; }; } \
+        && { test -z "$(mounted_type "$MOUNT")" || volume_mounted_at "$MOUNT"; } \
+        && test -x "$HELPER" && test -f "$APPLET_DIR/storage-boot.sh"; then repair_supported=1; fi
+    say "REPAIR_SUPPORTED=$repair_supported"
     say "SBDATA_MOUNTED=$sbdata_mounted"
     say "APPLET_BIND_ACTIVE=$bind_active"
     say "TOTAL_KB=$total"
@@ -410,7 +450,7 @@ status_snapshot() {
     say "INITIALIZATION_SUPPORTED=$init_supported"
     # Never offer destructive recovery for an active or unidentified volume.
     reinit_supported=0
-    if test "$init_supported" = 1 && exact_sbdata \
+    if test "$erase_capable" = 1 && exact_sbdata \
         && ! sbdata_is_mounted \
         && test -z "$(mounted_type "$MOUNT")" \
         && test -z "$(mounted_type "$SOURCE")" \
@@ -451,26 +491,123 @@ verify_recovered_tree() {
 }
 
 install_rcs_hook() {
+    install_retained_boot || return 1
     marker='# STANDALONEBASE-EXTENDED-STORAGE'
     tmp=$ROOT/tmp/rcS.local.sbstorage.$$
     if test -e "$RCS_LOCAL"; then cp -p "$RCS_LOCAL" "$tmp" || return 1; else printf '#!/bin/sh\n' >"$tmp" || return 1; fi
+    # Replace only our old command; retaining the marker makes repeat repairs
+    # byte-identical instead of appending new blocks or blank lines.
+    awk '$0 == "/bin/sh /mnt/storage/standalonebase/storage-boot.sh || true" {
+        print "/bin/sh /etc/standalonebase/storage-boot.sh || logger -t standalonebase-storage bootstrap_failed"; next
+    } {print}' "$tmp" >"$tmp.clean" || return 1
+    mv "$tmp.clean" "$tmp" || return 1
     if ! grep -qF "$marker" "$tmp"; then
         merged=$tmp.merged
         awk -v marker="$marker" '
             !done && $0 ~ /^[[:space:]]*exit[[:space:]]+0[[:space:]]*$/ {
-                print ""; print marker; print "/bin/sh /mnt/storage/standalonebase/storage-boot.sh || true"; done=1
+                print ""; print marker; print "/bin/sh /etc/standalonebase/storage-boot.sh || logger -t standalonebase-storage bootstrap_failed"; done=1
             }
             { print }
             END {
-                if (!done) { print ""; print marker; print "/bin/sh /mnt/storage/standalonebase/storage-boot.sh || true" }
+                if (!done) { print ""; print marker; print "/bin/sh /etc/standalonebase/storage-boot.sh || logger -t standalonebase-storage bootstrap_failed" }
             }
         ' "$tmp" >"$merged" || { rm -f "$tmp" "$merged"; return 1; }
         mv "$merged" "$tmp" || { rm -f "$tmp" "$merged"; return 1; }
     fi
-    cp "$tmp" "$RCS_LOCAL" || { rm -f "$tmp"; return 1; }
-    chmod 755 "$RCS_LOCAL" || { rm -f "$tmp"; return 1; }
+    /bin/sh -n "$tmp" && grep -q '/etc/standalonebase/storage-boot.sh' "$tmp" || return 1
+    if ! same_file "$tmp" "$RCS_LOCAL"; then
+        test ! -e "$RCS_LOCAL" || cp -p "$RCS_LOCAL" "$RCS_LOCAL.before-sbstorage-$$" || return 1
+        cp "$tmp" "$RCS_LOCAL.new" && chmod 755 "$RCS_LOCAL.new" && mv "$RCS_LOCAL.new" "$RCS_LOCAL" || return 1
+    fi
+    test -x "$RCS_LOCAL" || chmod 755 "$RCS_LOCAL" || { rm -f "$tmp"; return 1; }
     rm -f "$tmp"
 }
+
+# /init's upgrade cleanup preserves /etc/, unlike /mnt/storage/standalonebase.
+# Keep the old API/config path as an alias, without changing consumers or
+# relying on the misleading nested /mnt/storage view inside the UnionFS chroot.
+install_retained_boot() {
+    test ! -L "$RETAINED_DIR" || return 1
+    if test -L "$PERSIST_DIR"; then
+        test "$PERSIST_DIR" -ef "$RETAINED_DIR" || return 1
+    else
+        if test -d "$PERSIST_DIR"; then
+            # Never merge conflicting configurations or overwrite prior data.
+            if test -d "$RETAINED_DIR" && test -n "$(find "$RETAINED_DIR" -mindepth 1 -maxdepth 1 -print)"; then
+                operation_log 'REPAIR_STOP retained_and_legacy_directories_require_review'
+                return 1
+            fi
+            mkdir -p "$RETAINED_DIR" || return 1
+            cp -a "$PERSIST_DIR/." "$RETAINED_DIR/" || return 1
+            find "$PERSIST_DIR" -type f -print | while IFS= read -r file; do
+                same_file "$file" "$RETAINED_DIR/${file#"$PERSIST_DIR/"}" || exit 1
+            done || return 1
+            mv "$PERSIST_DIR" "$PERSIST_DIR.before-retained-$$" || return 1
+        else
+            test ! -e "$PERSIST_DIR" || return 1
+            mkdir -p "$RETAINED_DIR" "$(dirname "$PERSIST_DIR")" || return 1
+        fi
+        ln -s "$RETAINED_DIR" "$PERSIST_DIR.new" && mv "$PERSIST_DIR.new" "$PERSIST_DIR" || return 1
+    fi
+    chmod 700 "$RETAINED_DIR" || return 1
+    for name in storage-boot.sh sb-storage-helper; do
+        test -f "$APPLET_DIR/$name" || return 1
+        retained_install "$APPLET_DIR/$name" "$RETAINED_DIR/$name" 755 || return 1
+    done
+    if ! native_multi_ubifs; then
+        "$HELPER" verify-module "$BUNDLED_MODULE" >/dev/null 2>&1 || return 1
+        retained_install "$BUNDLED_MODULE" "$RETAINED_DIR/sbubifs-authorized.ko" 644 || return 1
+    fi
+    /bin/sh -n "$RETAINED_DIR/storage-boot.sh" || return 1
+    operation_log 'RETAINED_BOOT_READY path=/etc/standalonebase legacy_config_alias_preserved'
+}
+
+retained_install() {
+    same_file "$1" "$2" && return 0
+    test ! -e "$2" || cp -p "$2" "$2.before-$$" || return 1
+    cp "$1" "$2.new" && chmod "$3" "$2.new" && mv "$2.new" "$2"
+}
+
+same_file() {
+    test -f "$1" && test -f "$2" && "$HELPER" verify-copy "$1" "$2" >/dev/null 2>&1
+}
+
+# Repair installs support files only. It never replaces an applet tree or
+# activates it beneath a running Jive; the verified bootstrap runs next boot.
+repair_existing() (
+    mkdir "$ROOT/tmp/sbstorage-operation.lock" 2>/dev/null || exit 20
+    repair_mount=0
+    trap 'test "$repair_mount" = 0 || umount "$MOUNT"; rmdir "$ROOT/tmp/sbstorage-operation.lock"' EXIT
+    : >"$LOG_FILE" || exit 27
+    stage CHECKING_SYSTEM
+    exact_sbdata || die 20 repair_requires_existing_healthy_sbdata
+    native_multi_ubifs || legacy_driver_supported || die 22 repair_unsupported_kernel_or_firmware
+    test -f "$ROOT/etc/init.d/rcS" && grep -q rcS.local "$ROOT/etc/init.d/rcS" || die 27 repair_requires_supported_boot_hook
+    kind=$(mounted_type "$MOUNT")
+    if test -n "$kind"; then
+        volume_mounted_at "$MOUNT" || die 24 repair_foreign_mountpoint
+    else
+        ! sbdata_is_mounted || die 24 repair_volume_mounted_elsewhere
+        native_multi_ubifs || die 22 repair_requires_verified_native_mount_or_active_legacy_mount
+        mkdir -p "$MOUNT" || die 24 repair_mountpoint_failure
+        log_command mount -t ubifs -o ro ubi0:sbdata "$MOUNT" || die 24 repair_native_mount_failed
+        repair_mount=1
+        volume_mounted_at "$MOUNT" || die 24 repair_mount_identity_failed
+    fi
+    test -d "$DEST/StandaloneBase" && test -d "$DEST/SetupAppletInstaller" || die 26 repair_applet_tree_missing
+    stage INSTALLING_BOOT_SUPPORT
+    install_rcs_hook || die 27 repair_boot_install_failed
+    sync
+    stage COMPLETE
+    if volume_mounted_at "$SOURCE"; then
+        say STATUS=ACTIVE
+    else
+        touch "$REBOOT_MARKER" || die 27 repair_marker_failed
+        say STATUS=REBOOT_REQUIRED
+    fi
+    say EXIT_CODE=0
+    operation_log 'REPAIR_COMPLETE existing_applet_tree_and_data_unchanged'
+)
 
 initialize() {
     supplied=$1
@@ -480,6 +617,8 @@ initialize() {
     : >"$LOG_FILE" || exit 27
     stage CHECKING_SYSTEM
     operation_log "OPERATION_BEGIN type=$OPERATION"
+    native_multi_ubifs && die 20 native_existing_volume_use_repair_no_initialization
+    legacy_driver_supported || die 28 firmware_or_kernel_not_validated
     if test "${2:-}" = erase-existing; then
         exact_sbdata || die 20 reinitialization_requires_exact_sbdata
         test ! -f "$REBOOT_MARKER" || die 20 reinitialization_reboot_pending
@@ -582,6 +721,17 @@ initialize() {
 
 mount_existing() {
     supplied=$1
+    if native_multi_ubifs; then
+        exact_sbdata || exit 20
+        if volume_mounted_at "$MOUNT"; then exit 10; fi
+        test -z "$(mounted_type "$MOUNT")" && ! sbdata_is_mounted || exit 20
+        mkdir -p "$MOUNT" || exit 24
+        mount -t ubifs ubi0:sbdata "$MOUNT" || exit 24
+        volume_mounted_at "$MOUNT" || exit 24
+        status_snapshot
+        return
+    fi
+    legacy_driver_supported || exit 22
     test -d "$ROOT/sys/class/ubi/ubi0" || exit 20
     test -r "$VOLUME/name" && test "$(value "$VOLUME/name")" = sbdata || exit 21
     test "$(value "$VOLUME/type")" = dynamic || exit 20
@@ -729,6 +879,7 @@ case ${1:-} in
     check) check_storage ;;
     analyze) check_storage analyze ;;
     recover) recover_existing ;;
+    repair) repair_existing ;;
     mount)
         test "$#" = 2 || { echo "usage: storage-setup.sh mount PATH-TO-sbubifs-authorized.ko" >&2; exit 64; }
         mount_existing "$2"

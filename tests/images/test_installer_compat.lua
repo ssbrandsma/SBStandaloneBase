@@ -7,6 +7,7 @@ end
 local compat = dofile(root .. "/applet/InstallerCompat.lua")
 local active = "/usr/share/jive/applets"
 local mounted = true
+local mountKind, mountDevice = "sbubifs", "ubi0:sbdata"
 local fs = {
     attributes=function(path, key)
         local mode=nodes[path]
@@ -23,7 +24,7 @@ local files = {open=function(path, mode)
             return function()
                 if used then return nil end
                 used=true
-                return mounted and "ubi0:sbdata /usr/share/jive/applets sbubifs rw 0 0" or "none / unionfs rw 0 0"
+                return mounted and (mountDevice.." /usr/share/jive/applets "..mountKind.." rw 0 0") or "none / unionfs rw 0 0"
             end
         end}
     end
@@ -48,6 +49,12 @@ instance.appletdir="/mnt/storage/usr/share/jive/applets"
 assert(instance:_download()=="download" and seen.download==active)
 instance.appletdir="/mnt/storage/usr/share/jive/applets"
 assert(instance:_remove()=="remove" and seen.remove==active)
+mountKind="ubifs"
+assert(instance:appletInstallerMenu()=="window" and instance.appletdir==active)
+mountDevice="ubi0:ubifs"
+instance:appletInstallerMenu()
+assert(instance.appletdir~="/usr/share/jive/applets", "Do not route to the wrong UBIFS volume")
+mountDevice="ubi0:sbdata"; mountKind="sbubifs"
 mounted=false
 instance:_download(); assert(seen.download=="/mnt/storage/usr/share/jive/applets")
 instance:appletInstallerMenu();instance:_download();instance:_remove()

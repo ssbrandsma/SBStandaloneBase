@@ -16,6 +16,7 @@ local ImageRender = require("applets.StandaloneBase.ImageRender")
 local Artwork = require("applets.StandaloneBase.Artwork")
 local InstallerCompat = require("applets.StandaloneBase.InstallerCompat")
 local HttpTrace = require("applets.StandaloneBase.HttpTrace")
+local FirmwareUpdates = require("applets.StandaloneBase.FirmwareUpdates")
 local io, os, tonumber, tostring = io, os, tonumber, tostring
 local ipairs, pairs, math, pcall, string = ipairs, pairs, math, pcall, string
 local appletManager = appletManager
@@ -178,6 +179,7 @@ function init(self)
     for i=2,#SERVICES do if not launch(SERVICES[i]) then self.failures[SERVICES[i].exe]=1 end end
     self.timeSync=TimeSync.new(); self.timeSync:start()
     self.remoteBridge=RemoteBridge(); self.remoteBridge:init()
+    self.firmwareUpdates=FirmwareUpdates.new(self,self.remoteBridge); self.firmwareUpdates:start()
     redirectLiveBootstrapServer()
     self.monitor=Timer(15000,function() self:supervise() end); self.monitor:start()
     -- A firmware upgrade can leave sbdata intact while removing its boot
@@ -185,8 +187,9 @@ function init(self)
     self.storageRecoveryTimer=Timer(2000,function()
         self.storageRecoveryTimer=nil
         local status=storage:check()
-        if tonumber(status.RECOVERY_SUPPORTED)==1 then
-            storage:startRecovery(nil,function(exitCode, result)
+        if tonumber(status.REPAIR_SUPPORTED)==1 or tonumber(status.RECOVERY_SUPPORTED)==1 then
+            local operation=tonumber(status.REPAIR_SUPPORTED)==1 and storage.startRepair or storage.startRecovery
+            operation(storage,nil,function(exitCode, result)
                 self.storageRecoveryResult=result
                 self.storageRecoveryFailed=exitCode~=0
             end)
@@ -198,6 +201,7 @@ function startServices(self)
     for _,s in ipairs(SERVICES) do if not launch(s) then self.failures[s.exe]=1 end end
 end
 function supervise(self)
+    if self.firmwareUpdates and self.firmwareUpdates:busy() then return end
     suppressRetiredCloudServer()
     redirectLiveBootstrapServer()
     connectToLocalServer()
@@ -217,7 +221,8 @@ function menu(self)
     for _,s in ipairs(SERVICES) do menu:addItem({text=s.name..": "..(alive(s) and "Running" or "Stopped")}) end
     menu:addItem({text="Extended Storage",callback=function() self:storageMenu() end})
     menu:addItem({text="Web Access",callback=function() if not self.remoteBridge:isInjecting() then self:webAccessMenu() end end})
-	menu:addItem({text="Version: 0.6.1"})
+    menu:addItem({text="Custom Firmware Updates",callback=function() self.firmwareUpdates:menu() end})
+	menu:addItem({text="Version: 0.6.2"})
     window:addWidget(menu); window:show()
 end
 function webAccessMenu(self)
@@ -289,6 +294,8 @@ function storageMenu(self)
         menu:addItem({text="Used: "..ExtendedStorageState.mibFromKb(s.USED_KB),style="item_info"})
         menu:addItem({text="Free: "..ExtendedStorageState.mibFromKb(s.FREE_KB),style="item_info"})
         menu:addItem({text="Applet storage: Extended Storage",style="item_info"})
+    elseif tonumber(s.REPAIR_SUPPORTED)==1 then
+        menu:setHeaderWidget(Textarea("help_text","Existing Extended Storage data is intact. Repair startup integration to restore boot support without erasing or replacing the applets."))
     elseif tonumber(s.RECOVERY_SUPPORTED)==1 then
         menu:setHeaderWidget(Textarea("help_text","Existing Extended Storage needs recovery, not initialization. Recovery runs automatically after Standalone Base starts. See /tmp/sbstorage.log if it cannot complete."))
     elseif s.STATUS=="AVAILABLE" then
@@ -305,6 +312,16 @@ function storageMenu(self)
     if not storage.process and tonumber(s.REINITIALIZATION_SUPPORTED)==1 then
         menu:addItem({text="Erase and reinitialize Extended Storage",callback=function()
             self:confirmStorageErasure()
+        end})
+    end
+    if not storage.process and tonumber(s.REPAIR_SUPPORTED)==1 then
+        menu:addItem({text="Repair startup integration (preserve data)",callback=function()
+            if self.remoteBridge and self.remoteBridge:isInjecting() then return end
+            storage:startRepair(nil,function(exitCode,result)
+                self.storageRecoveryFailed=exitCode~=0
+                self.storageRecoveryResult=result
+                window:hide(); self:storageMenu()
+            end)
         end})
     end
     window:addWidget(menu); window:show()
@@ -385,6 +402,7 @@ function getStandaloneStorageStatus(self) return storage:getStorageStatus() end
 function getStandaloneStoragePreparation(self) return storage:getStoragePreparation() end
 function verifyStandaloneStorage(self) return storage:verifyStorage() end
 function free(self)
+    if self.firmwareUpdates then self.firmwareUpdates:stop(); self.firmwareUpdates=nil end
     if self.monitor then self.monitor:stop() end
     if self.storageRecoveryTimer then self.storageRecoveryTimer:stop(); self.storageRecoveryTimer=nil end
     if self.timeSync then self.timeSync:stop(); self.timeSync=nil end

@@ -43,6 +43,11 @@ Read-only flash capacity reporting and the disabled expansion research milestone
 
 The host-tested Extended Storage integration and its explicit physical-validation boundary are documented in `docs/EXTENDED_STORAGE.md`.
 
+For retained boot support, native multi-UBIFS mounting and non-destructive recovery
+after firmware updates, see [post-firmware recovery](docs/POST_FIRMWARE_RECOVERY.md).
+The report distinguishes verified storage persistence from the remaining watchdog
+stability issue; it is not a guarantee for every future firmware.
+
 On Windows:
 ```
 wsl.exe sh -lc 'cd /mnt/c/Projects/SBStandaloneBase/StandaloneBase && ./scripts/build-arm.sh'

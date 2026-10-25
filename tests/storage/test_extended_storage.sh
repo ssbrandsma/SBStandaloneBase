@@ -176,7 +176,7 @@ check | grep -q '^VOLUME_PRESENT=0$'
 check | grep -q '^INITIALIZATION_SUPPORTED=1$'
 # valid inactive sbdata
 make_base; add_volume; expect_status AVAILABLE
-check | grep -q '^INITIALIZATION_SUPPORTED=1$'
+check | grep -q '^INITIALIZATION_SUPPORTED=0$'
 check | grep -q '^REINITIALIZATION_SUPPORTED=1$'
 # active sbdata
 mkdir -p "$fixture/mnt/sbdata/applets"
@@ -373,6 +373,8 @@ run_init() {
 }
 
 reset_runtime() {
+    # A fresh fixture installation must also clear the new retained location.
+    rm -rf "$fixture/etc/standalonebase"
     rm -rf "$fixture/mnt/sbdata" "$fixture/mnt/storage/standalonebase"
     rm -f "$fixture/tmp/ubimkvol.calls" "$fixture/tmp/ubiupdatevol.calls" "$fixture/tmp/sbstorage.status" "$fixture/tmp/sbstorage.log"
     printf '0\n' >"$fixture/sys/class/ubi/ubi0_5/corrupted"

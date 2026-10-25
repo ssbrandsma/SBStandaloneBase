@@ -63,7 +63,7 @@ static curl_socket_t public_image_socket(void *data,
 	return socket(address->family, address->socktype, address->protocol);
 }
 
-#define VERSION "0.6.1"
+#define VERSION "0.6.2"
 
 #define MAX_REQUEST 16384
 #define MAX_HEADERS 32768
@@ -664,6 +664,7 @@ static int send_health_response(int fd, int head)
 				 "HTTP/1.1 200 OK\r\n"
 				 "Content-Type: text/plain\r\n"
 				 "X-SB-Public-Fetch: 1\r\n"
+				 "X-SB-Firmware-Fetch: 1\r\n"
 				 "X-SB-HLS: aac-mp3-ts\r\n"
 				 "Content-Length: %d\r\n"
 				 "Connection: close\r\n"
@@ -1041,11 +1042,14 @@ static void *worker_main(void *opaque)
 #endif
 		curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
 		curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 3L);
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 8L);
+		int firmware_fetch = strstr(request,
+			"\r\nX-SB-Firmware-Fetch: 1\r\n") != NULL;
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, firmware_fetch ? 300L : 8L);
 		if (!artwork && !plain_http && !hls)
 			curl_easy_setopt(curl,
 					 CURLOPT_MAXFILESIZE_LARGE,
-					 (curl_off_t)(1024u * 1024u));
+					 (curl_off_t)(firmware_fetch ?
+					 24u * 1024u * 1024u : 1024u * 1024u));
 	}
 
 	/*

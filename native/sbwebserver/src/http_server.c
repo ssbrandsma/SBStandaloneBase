@@ -20,6 +20,7 @@
 #include "logs.h"
 #include "monitor.h"
 #include "image_render.h"
+#include "firmware.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -536,6 +537,13 @@ normal(Server *s, struct mg_connection *c, struct mg_http_message *m)
 	Settings x;
 	int protected_route;
 	settings_load(&x);
+	if ((m->uri.len >= 23 &&
+	     !memcmp(m->uri.buf, "/api/internal/firmware/", 23)) ||
+	    (m->uri.len >= 10 && !memcmp(m->uri.buf, "/firmware/", 10))) {
+		firmware_handle(
+			c, m, remote_internal_authorized(c, m), x.readonly);
+		return;
+	}
 	if (auth_is_endpoint(m->uri)) {
 		auth_handle(c, m, remote_internal_authorized(c, m));
 		return;
@@ -558,6 +566,8 @@ normal(Server *s, struct mg_connection *c, struct mg_http_message *m)
 		error(c, 401, "Browser pairing required");
 		return;
 	}
+	if (firmware_handle(c, m, 0, x.readonly))
+		return;
 	if (remote_handle(c, m, x.readonly))
 		return;
 	if (logs_handle(c, m))
@@ -708,6 +718,15 @@ normal(Server *s, struct mg_connection *c, struct mg_http_message *m)
 static void fn(struct mg_connection *c, int ev, void *data)
 {
 	Server *s = c->fn_data;
+	int firmware_readonly = 0;
+	if (ev == MG_EV_HTTP_HDRS &&
+	    is(((struct mg_http_message *)data)->uri, "/api/firmware/upload")) {
+		Settings firmware_settings;
+		settings_load(&firmware_settings);
+		firmware_readonly = firmware_settings.readonly;
+	}
+	if (firmware_upload_event(c, ev, data, firmware_readonly))
+		return;
 	Upload *u = up(s, c->id, 0);
 	if (ev == MG_EV_HTTP_HDRS) {
 		struct mg_http_message *m = data;
@@ -762,6 +781,7 @@ int http_server_run(int port, const char *root)
 	s.root = root;
 	auth_init();
 	remote_init(d);
+	firmware_init(port);
 	snprintf(url, sizeof url, "http://0.0.0.0:%d", port);
 	struct mg_mgr mgr;
 	mg_mgr_init(&mgr);
@@ -776,5 +796,6 @@ int http_server_run(int port, const char *root)
 		image_render_tick(&mgr);
 		catalog_sync_tick(&mgr);
 		remote_tick();
+		firmware_tick();
 	}
 }

@@ -44,6 +44,9 @@ typedef struct {
 	int https;
 } ImageUrl;
 
+/* Set only in a forked firmware preparer, never in the web event loop. */
+static int firmware_fetch;
+
 typedef struct {
 	unsigned status, size, cached, fallback_failed;
 } Result;
@@ -208,6 +211,9 @@ typedef struct {
 	size_t remaining, chunk_remaining;
 	int detached, chunked, chunk_end;
 	size_t limit;
+	mg_sha1_ctx firmware_sha1;
+	mg_sha256_ctx firmware_sha256;
+    unsigned char digest1[20], digest256[32];
     sb_http_trace trace;
 } Fetch;
 
@@ -245,6 +251,10 @@ static void stream_body(struct mg_connection *c, Fetch *f)
 		if (!f->chunked && count > f->remaining) count=f->remaining;
 		if (count > f->limit-f->size) goto too_large;
 		if (count && fwrite(c->recv.buf,1,count,f->stream) != count) { f->status=503; goto stop; }
+		if (firmware_fetch) {
+			mg_sha1_update(&f->firmware_sha1, c->recv.buf, count);
+			mg_sha256_update(&f->firmware_sha256, c->recv.buf, count);
+		}
 		f->size += count;
 		mg_iobuf_del(&c->recv,0,count);
 		if (f->chunked) { f->chunk_remaining-=count; if (!f->chunk_remaining) f->chunk_end=1; }
@@ -352,6 +362,10 @@ static Fetch fetch_once(const char *address,
 {
 	struct mg_mgr mgr;
 	Fetch f = {0};
+	if (firmware_fetch) {
+		mg_sha1_init(&f.firmware_sha1);
+		mg_sha256_init(&f.firmware_sha256);
+	}
 	if (file) {
 		f.limit=job.input_limit;
 		int fd=open(file,O_WRONLY|O_CREAT|O_TRUNC|O_NOFOLLOW,0600);
@@ -379,7 +393,9 @@ static Fetch fetch_once(const char *address,
 			"close\r\nX-SB-Trace-Id: %s\r\n\r\n",
 			path,
 			host,
-			public_only ? "X-SB-Public-Fetch: 1\r\n" : "",f.trace.id);
+			public_only ? (firmware_fetch ?
+			"X-SB-Public-Fetch: 1\r\nX-SB-Firmware-Fetch: 1\r\n" :
+			"X-SB-Public-Fetch: 1\r\n") : "",f.trace.id);
 	while (!f.done && mg_millis() < deadline)
 		mg_mgr_poll(&mgr, 20);
 	if (!f.done) {
@@ -388,6 +404,10 @@ static Fetch fetch_once(const char *address,
 	}
 	mg_mgr_free(&mgr);
 	if (f.stream && fclose(f.stream)) f.status=503;
+	if (firmware_fetch) {
+		mg_sha1_final(f.digest1, &f.firmware_sha1);
+		mg_sha256_final(f.digest256, &f.firmware_sha256);
+	}
 	f.stream=NULL;
     sb_trace_end(&f.trace,(int)f.status,(unsigned long long)f.size,f.status>=400 ? "image HTTP fetch failed" : NULL);
 	return f;
@@ -471,6 +491,35 @@ redirect_handling:
 	return f;
 }
 
+/** Validate a firmware source using the existing strict HTTP(S) URL parser. */
+int sb_fetch_public_url_valid(const char *url)
+{
+	ImageUrl parsed;
+	return parse_url(url, &parsed);
+}
+
+/** Stream a public firmware source in a child, reusing the image transport.
+ * path is a private temporary file; received gets the actual byte count.
+ * The caller validates the trusted digest and native container separately.
+ */
+int sb_fetch_firmware_file(const char *url, const char *path, unsigned *received,
+                           char sha1[41], char sha256[65])
+{
+	ImageUrl parsed;
+	if (!parse_url(url, &parsed))
+		return 400;
+	firmware_fetch = 1;
+	job.input_limit = 24u * 1024u * 1024u;
+	Fetch result = download_bounded(parsed, path, "firmware", 300000);
+	*received = result.size;
+	for (unsigned i = 0; i < 20; i++)
+		snprintf(sha1 + i * 2, 3, "%02x", result.digest1[i]);
+	for (unsigned i = 0; i < 32; i++)
+		snprintf(sha256 + i * 2, 3, "%02x", result.digest256[i]);
+	free(result.body);
+	return (int)result.status;
+}
+
 /** Select extended storage only, with an explicit host-test override. */
 static int cache_directory(char *path, size_t capacity)
 {
@@ -492,6 +541,7 @@ static int cache_directory(char *path, size_t capacity)
 				   mount,
 				   type) == 3 &&
 			    !strcmp(mount, "/mnt/sbdata") &&
+			    (!strcmp(dev, "ubi0:sbdata") || !strcmp(dev, "/dev/ubi0_5")) &&
 			    (!strcmp(type, "ubifs") ||
 			     !strcmp(type, "sbubifs")))
 				found = 1;

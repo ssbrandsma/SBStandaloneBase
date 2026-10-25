@@ -600,10 +600,16 @@ static void mounts(info_t *i)
 			}
 			i->mounted = 1;
 		}
-		if (!strcmp(type, "ubifs") && !strcmp(mnt, "/mnt/sbdata") &&
-		    (strstr(dev, "sbdata") || strstr(dev, "ubi0_")))
+		int extended =
+			!strcmp(type, "ubifs") || !strcmp(type, "sbubifs");
+		int sbdata = !strcmp(dev, "ubi0:sbdata") ||
+			     !strcmp(dev, "/dev/ubi0_5");
+		if (extended && !strcmp(mnt, "/mnt/sbdata") && sbdata)
 			i->sbdata_mounted = 1;
-		if (!strcmp(mnt, APPLETS) && strstr(dev, "/mnt/sbdata/applets"))
+		if (!strcmp(mnt, APPLETS) &&
+		    ((extended && sbdata) ||
+		     (!strcmp(dev, "/mnt/sbdata/applets") &&
+		      (extended || !strcmp(type, "none")))))
 			i->bind_mounted = 1;
 	}
 	fclose(f);
@@ -790,9 +796,10 @@ static void collect(info_t *i)
 	i->standard_applets = directory(APPLETS "/SetupAppletInstaller");
 	i->standalone_base = directory(APPLETS "/StandaloneBase");
 	i->boot_helper = exists(BOOT_HELPER) ||
-		exists("/mnt/storage/standalonebase/storage-boot.sh");
+			 exists("/mnt/storage/standalonebase/storage-boot.sh");
 	i->rcs_local = exists(RCS_LOCAL);
-	i->rcs_integrated = contains(RCS_LOCAL, "STANDALONEBASE-SBDATA") ||
+	i->rcs_integrated =
+		contains(RCS_LOCAL, "STANDALONEBASE-SBDATA") ||
 		contains(RCS_LOCAL, "STANDALONEBASE-EXTENDED-STORAGE");
 	i->ubifs_supported = contains("/proc/filesystems", "ubifs");
 	i->ubimkvol_tool = exists("/usr/sbin/ubimkvol") ||
@@ -866,7 +873,8 @@ static int compatible(const info_t *i, char *r, size_t n)
 		return 0;
 	}
 	if (((!strcmp(i->firmware, "7.7.2 r9663") ||
-	      !strcmp(i->firmware, "7.7.3 r16676")) && !layout77x) ||
+	      !strcmp(i->firmware, "7.7.3 r16676")) &&
+	     !layout77x) ||
 	    (!strcmp(i->firmware, "9.0.1 r17084") && !layout901)) {
 		snprintf(r, n, "missing_production_volume");
 		return 0;
@@ -1299,7 +1307,8 @@ static int verify_copy(const char *first, const char *second)
 	do {
 		na = fread(a, 1, sizeof a, left);
 		nb = fread(b, 1, sizeof b, right);
-		if (na != nb || memcmp(a, b, na) || ferror(left) || ferror(right))
+		if (na != nb || memcmp(a, b, na) || ferror(left) ||
+		    ferror(right))
 			goto done;
 	} while (na);
 	result = 0;

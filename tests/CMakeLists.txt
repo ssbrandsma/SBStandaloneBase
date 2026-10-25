@@ -31,6 +31,10 @@ add_test(NAME extended_storage COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/storage/te
   ${CMAKE_SOURCE_DIR}/artifacts/ubi/sbdata-empty.ubifs)
 find_program(LUA_EXECUTABLE NAMES lua lua5.1)
 if(LUA_EXECUTABLE)
+  add_test(NAME firmware_physical_input COMMAND ${LUA_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/firmware/test_physical.lua ${CMAKE_SOURCE_DIR})
+  add_test(NAME firmware_bridge_lua COMMAND ${LUA_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/firmware/test_bridge.lua ${CMAKE_SOURCE_DIR})
   add_test(NAME storage_recovery_menu COMMAND ${LUA_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/storage/test_recovery_menu.lua ${CMAKE_SOURCE_DIR})
   add_test(NAME storage_recovery_manager COMMAND ${LUA_EXECUTABLE}
@@ -97,9 +101,30 @@ if(NOT WIN32)
     add_executable(sbwebserver_catalog_test ${CATALOG_TEST_SOURCES})
     target_include_directories(sbwebserver_catalog_test PRIVATE
       ../native/sbwebserver/src ../native/sbwebserver/third_party)
-    target_compile_definitions(sbwebserver_catalog_test PRIVATE _GNU_SOURCE SB_CATALOG_TESTING
+    target_compile_definitions(sbwebserver_catalog_test PRIVATE _GNU_SOURCE SB_CATALOG_TESTING SB_FIRMWARE_TESTING SB_IMAGE_TESTING
       MG_ENABLE_EPOLL=0 MG_ENABLE_POLL=1 MG_ENABLE_DIRLIST=0 MG_ENABLE_SSI=0)
-    target_link_libraries(sbwebserver_catalog_test PRIVATE Threads::Threads)
+    find_package(ZLIB REQUIRED)
+    target_link_libraries(sbwebserver_catalog_test PRIVATE Threads::Threads ZLIB::ZLIB)
+    add_executable(test_firmware_image firmware/image_check.c
+      ../native/sbwebserver/src/firmware_image.c ../native/sbwebserver/third_party/mongoose.c)
+    target_include_directories(test_firmware_image PRIVATE
+      ../native/sbwebserver/src ../native/sbwebserver/third_party)
+    target_compile_definitions(test_firmware_image PRIVATE _GNU_SOURCE MG_ENABLE_EPOLL=0 MG_ENABLE_POLL=1)
+    target_link_libraries(test_firmware_image PRIVATE Threads::Threads ZLIB::ZLIB)
+    add_test(NAME firmware_image COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/firmware/test_image.py $<TARGET_FILE:test_firmware_image>)
+    add_test(NAME firmware_http COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/firmware/test_http.py $<TARGET_FILE:sbwebserver_catalog_test>
+      ${CMAKE_SOURCE_DIR}/native/sbwebserver/web)
+    add_test(NAME firmware_upload COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/firmware/test_upload.py $<TARGET_FILE:sbwebserver_catalog_test>
+      ${CMAKE_SOURCE_DIR}/native/sbwebserver/web)
+    add_test(NAME firmware_checksum_download COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/firmware/test_download.py $<TARGET_FILE:sbwebserver_catalog_test>
+      ${CMAKE_SOURCE_DIR}/native/sbwebserver/web)
+    add_test(NAME storage_native_boot COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/storage/test_native_boot.py
+      ${CMAKE_SOURCE_DIR}/scripts/storage-boot.sh)
     add_test(NAME catalog_sync COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/repository/test_catalog_sync.py $<TARGET_FILE:sbwebserver_catalog_test>
       ${CMAKE_SOURCE_DIR}/native/sbwebserver/web)
@@ -142,6 +167,8 @@ if(NOT WIN32)
         ${CMAKE_CURRENT_SOURCE_DIR}/images/test_proxy_guard.py $<TARGET_FILE:sbproxy>)
     endif()
     add_test(NAME comet_connections COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/comet/test_connections.py $<TARGET_FILE:sbbase>)
+    add_test(NAME firmware_comet COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/firmware/test_comet.py $<TARGET_FILE:sbbase>)
     add_test(NAME comet_menustatus COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/comet/test_menustatus.py $<TARGET_FILE:sbbase>)
     add_test(NAME comet_server_switch COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/comet/test_server_switch.py $<TARGET_FILE:sbbase>)
     add_test(NAME nowplaying_poc COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/comet/test_nowplaying.py $<TARGET_FILE:sbbase>)

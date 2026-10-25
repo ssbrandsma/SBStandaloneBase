@@ -29,6 +29,8 @@ if [ ! -f "$wolf_prefix/sbproxy-rsa-capacity" ] ||
   SBHTTPSPROXY_ROOT="$SBHTTPSPROXY_ROOT" sh "$root/scripts/build-proxy-tls.sh"
 fi
 test -f "$wolf_prefix/lib/libwolfssl.a"
+image_prefix="${ARM_IMAGE_PREFIX:-$root/build-image-arm/prefix}"
+test -f "$image_prefix/lib/libz.a" || { echo "Run scripts/build-image-libs.sh first" >&2; exit 1; }
 mkdir -p "$out"
 
 "$cc" -static $flags -std=c99 -Wall -Wextra -Wpedantic -Wl,--gc-sections \
@@ -37,9 +39,9 @@ mkdir -p "$out"
 
 "$cc" -static $flags -std=c99 -Wall -Wextra -pthread -Wl,--gc-sections \
   -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -DMG_ENABLE_EPOLL=0 -DMG_ENABLE_POLL=1 \
-  -DMG_ENABLE_DIRLIST=0 -DMG_ENABLE_SSI=0 -I"$root/native/sbwebserver/src" \
+  -DMG_ENABLE_DIRLIST=0 -DMG_ENABLE_SSI=0 -I"$root/native/sbwebserver/src" -I"$image_prefix/include" \
   -I"$root/native/sbwebserver/third_party" "$root/native/sbwebserver/src/"*.c \
-  "$root/native/sbwebserver/third_party/mongoose.c" -o "$out/sbwebserver"
+  "$root/native/sbwebserver/third_party/mongoose.c" "$image_prefix/lib/libz.a" -o "$out/sbwebserver"
 
 "$cc" -static $flags -std=c99 -Wall -Wextra -Wpedantic -pthread -Wl,--gc-sections \
   -D_GNU_SOURCE -I"$wolf_prefix/include" -I"$tls_prefix/include" "$root/native/sbproxy/sbproxy.c" \

@@ -4,9 +4,9 @@ local f = assert(io.open(root .. "/applet/StandaloneBaseApplet.lua"))
 local text = f:read("*a"); f:close()
 local source = assert(text:match("(function storageMenu%b().-)function confirmStorageInitialization"))
 ExtendedStorageState = assert(loadfile(root .. "/applet/ExtendedStorageState.lua"))()
-local status, header, items, reinitialization
-storage = {check=function() return {STATUS=status, REINITIALIZATION_SUPPORTED=reinitialization} end}
-Window = function() return {addWidget=function() end,show=function() end} end
+local status, header, items, reinitialization, repair
+storage = {check=function() return {STATUS=status, REINITIALIZATION_SUPPORTED=reinitialization, REPAIR_SUPPORTED=repair} end}
+Window = function() return {addWidget=function() end,show=function() end,hide=function() end} end
 SimpleMenu = function() return {addItem=function(_, item) items[#items+1]=item end,
     setHeaderWidget=function(_, value) header=value end} end
 Textarea = function(_, text) return text end
@@ -30,6 +30,19 @@ storage.process=true; items={}; storageMenu(self)
 assert(#items==1, "Do not offer erasure during recovery")
 storage.process=nil; reinitialization=0; items={}; storageMenu(self)
 assert(#items==1, "Do not offer erasure without server-side eligibility")
+
+self.storageRecoveryFailed=false; repair=1; items={}
+storageMenu(self)
+assert(header:find("data is intact"))
+assert(items[#items].text=="Repair startup integration (preserve data)")
+local repaired=false
+storage.startRepair=function(_,_,done) repaired=true; done(0,{STAGE="COMPLETE"}); return true end
+self.storageMenu=function() end
+self.remoteBridge={isInjecting=function() return true end}
+items[#items].callback(); assert(not repaired)
+self.remoteBridge={isInjecting=function() return false end}
+items[#items].callback(); assert(repaired and not self.storageRecoveryFailed)
+repair=0
 
 -- Exercise the actual confirmation UI, including remote-input rejection.
 local confirmation=assert(text:match("(function confirmStorageErasure%b().-)function startStorageInitialization"))

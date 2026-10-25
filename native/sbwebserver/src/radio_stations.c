@@ -58,7 +58,9 @@ static int extended_mounted(void)
 		return 0;
 	while (fgets(line, sizeof line, f))
 		if (sscanf(line, "%127s %255s %31s", dev, mnt, type) == 3 &&
-		    !strcmp(mnt, "/mnt/sbdata") && !strcmp(type, "sbubifs")) {
+		    !strcmp(mnt, "/mnt/sbdata") &&
+		    (!strcmp(type, "sbubifs") || !strcmp(type, "ubifs")) &&
+		    (!strcmp(dev, "ubi0:sbdata") || !strcmp(dev, "/dev/ubi0_5"))) {
 			fclose(f);
 			return 1;
 		}
