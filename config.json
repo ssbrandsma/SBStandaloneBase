@@ -15,7 +15,7 @@
     {
       "name": "StandaloneBase",
       "title": "Standalone Base",
-      "version": "0.6.2",
+      "version": "0.6.3",
       "target": "baby",
       "min_target_version": "7.7.2",
       "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.6.2.zip",
@@ -44,10 +44,10 @@
       "version": "0.6.2",
       "target": "baby",
       "min_target_version": "7.7",
-      "url": "http://49.12.198.91/sbspotifyconnect/SpotifyConnect-0.6.2.zip",
-      "sha": "d6edaa67a6e6affaf61e96732a34a9877dcb11ae",
+      "url": "http://49.12.198.91/sbspotifyconnect/SpotifyConnect-0.6.3.zip",
+      "sha": "d84ee932863dafb2734e31ddfebf9701957272a6",
       "desc": "Standalone Spotify Connect playback for Logitech Squeezebox Radio.",
-      "changes": "Add Disabled, Manual, and Always On Spotify service lifecycle modes with safe recovery.",
+      "changes": "Fix device authorization status JSON so the Spotify pairing QR code is displayed.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     },
