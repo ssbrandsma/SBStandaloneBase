@@ -1,6 +1,6 @@
 {
   "catalog_version": "1",
-  "standalone_base_version": "0.6.2",
+  "standalone_base_version": "0.6.3",
   "server": {
     "name": "Standalone Base",
     "uuid": "9d989f40-499a-4b85-b92f-8dc415af2a04",
@@ -15,26 +15,26 @@
     {
       "name": "StandaloneBase",
       "title": "Standalone Base",
-      "version": "0.6.2",
+      "version": "0.6.3",
       "target": "baby",
       "min_target_version": "7.7.2",
-      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.6.2.zip",
-      "sha": "8b55e02be102c63c76980ea9b863d3870d6faf38",
+      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.6.3.zip",
+      "sha": "945e8b457201901c0d50ad26f4c5bfd49807c97c",
       "desc": "Local LMS-compatible infrastructure services for Squeezebox Radio.",
-      "changes": "Add physically authorized firmware preparation, paced browser uploads, SHA-1/SHA-256 validation and retained non-destructive Extended Storage recovery.",
+      "changes": "Fix missing repeat and shuffle fields in stopped player status to prevent stock Now Playing nil-mode errors; pair with Radio 0.9.15 for LMS handoff and volume isolation fixes.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     },
     {
       "name": "StandaloneRadio",
       "title": "Standalone Radio",
-      "version": "0.9.14",
+      "version": "0.9.15",
       "target": "baby",
       "min_target_version": "7.7",
-      "url": "http://49.12.198.91/sbstandalone/StandaloneRadio-0.9.14.zip",
-      "sha": "743c649015758ed6e8d3ac0a823bca2b7d6e9916",
+      "url": "http://49.12.198.91/sbstandalone/StandaloneRadio-0.9.15.zip",
+      "sha": "c60297a665fa92306572052db5d7eb21df6ec0c4",
       "desc": "Standalone internet radio playback for Logitech Squeezebox Radio.",
-      "changes": "Add custom OPML directories and fix HTTP-to-HTTPS playlist redirects with bounded request cleanup and HLS playback.",
+      "changes": "Keep Standalone playback running during background LMS reconnects; isolate stale LMS gain and decoder commands while preserving intentional library switching.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     },

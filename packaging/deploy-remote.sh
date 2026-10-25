@@ -40,6 +40,16 @@ install -o "$WEB_OWNER" -g "$WEB_OWNER" -m 0644 "$release_dir/merged-extensions-
 install -o "$BOOTSTRAP_OWNER" -g "$BOOTSTRAP_OWNER" -m 0644 "$release_dir/squeezebox-config-standalonebase-$version.json" "$bootstrap_config"
 
 test "$(sha1sum "$base_root/StandaloneBase-$version.zip" | cut -d' ' -f1)" = "$expected_sha"
+# Preserve optional Applet Installer repository checksum sidecars.
+for manifest in "$base_root/extensions.xml" "$merged_xml"; do
+    if test -f "$manifest.sha1"; then
+        cp -p "$manifest.sha1" "$manifest.sha1.bak.$stamp"
+        cp -p "$manifest.sha1" "$manifest.sha1.new"
+        sha1sum "$manifest" | cut -d' ' -f1 > "$manifest.sha1.new"
+        mv "$manifest.sha1.new" "$manifest.sha1"
+    fi
+done
+
 docker restart "$CONTAINER_NAME" >/dev/null
 docker ps --format '{{.Names}} {{.Status}}' | grep -F "$CONTAINER_NAME "
 echo "Backup timestamp: $stamp"

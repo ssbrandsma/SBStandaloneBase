@@ -618,7 +618,7 @@ int np_playerstatus_json(np_manager *m, char *out, size_t cap)
 				"connected\":1,\"power\":1,\"mode\":\"stop\","
 				"\"time\":0,\"duration\":0,\"playlist_tracks\":"
 				"0,\"count\":0,\"offset\":0,\"playlist_cur_"
-				"index\":0,\"mixer "
+				"index\":0,\"playlist repeat\":0,\"playlist shuffle\":0,\"mixer "
 				"volume\":50,\"digital_volume_control\":1,"
 				"\"player_needs_upgrade\":0,\"player_is_"
 				"upgrading\":0,\"seq_no\":0}");

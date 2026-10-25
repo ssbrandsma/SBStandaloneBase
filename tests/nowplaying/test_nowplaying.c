@@ -37,6 +37,41 @@ static int call(np_manager *m,
  * @brief Run the program entry point.
  * @return Process exit status.
  */
+/** Verify stock NowPlaying mode fields across the full radio lifecycle. */
+static void test_status_modes(void)
+{
+	np_manager *m = np_create(30, 8);
+	char reply[8192], body[512], token[NP_TOKEN_MAX];
+	const char *states[] = {"buffering", "playing", "paused", "stopped"};
+	const char *modes[] = {"stop", "play", "pause", "stop"};
+	const char *start, *end;
+	int changed;
+	assert(m);
+	assert(call(m, "/api/nowplaying/claim", "{\"source\":\"radio\",\"name\":\"Radio\"}",
+		    &changed, reply, sizeof reply) == 201);
+	start = strstr(reply, "\"session_id\":\"") + 14;
+	end = strchr(start, '"');
+	assert(end && (size_t)(end - start) < sizeof token);
+	memcpy(token, start, (size_t)(end - start));
+	token[end - start] = 0;
+	for (size_t i = 0; i < sizeof states / sizeof states[0]; i++) {
+		snprintf(body, sizeof body,
+			 "{\"session_id\":\"%s\",\"state\":\"%s\",\"live\":true}", token, states[i]);
+		assert(call(m, "/api/nowplaying/update", body, &changed, reply, sizeof reply) == 200);
+		assert(np_playerstatus_json(m, reply, sizeof reply) > 0);
+		assert(strstr(reply, "\"playlist repeat\":0,"));
+		assert(strstr(reply, "\"playlist shuffle\":0,"));
+		snprintf(body, sizeof body, "\"mode\":\"%s\"", modes[i]);
+		assert(strstr(reply, body));
+	}
+	snprintf(body, sizeof body, "{\"session_id\":\"%s\"}", token);
+	assert(call(m, "/api/nowplaying/release", body, &changed, reply, sizeof reply) == 200);
+	assert(np_playerstatus_json(m, reply, sizeof reply) > 0);
+	assert(strstr(reply, "\"playlist repeat\":0,"));
+	assert(strstr(reply, "\"playlist shuffle\":0,"));
+	np_destroy(m);
+}
+
 int main(void)
 {
 	np_manager *m = np_create(1, 8);
@@ -47,12 +82,15 @@ int main(void)
 	struct timespec delay = {1, 100000000};
 
 	assert(m);
+	test_status_modes();
 	assert(sizeof(np_status) < 8192);
 	/* SlimBrowser.DB requires count even when the playlist is empty. */
 	assert(np_playerstatus_json(m, reply, sizeof reply) > 0);
 	assert(strstr(reply, "\"count\":0,"));
 	assert(strstr(reply, "\"offset\":0,"));
 	assert(strstr(reply, "\"playlist_tracks\":0,"));
+	assert(strstr(reply, "\"playlist repeat\":0,"));
+	assert(strstr(reply, "\"playlist shuffle\":0,"));
 	assert(call(m,
 		    "/api/nowplaying/claim",
 		    "{\"source\":\"radio\",\"name\":\"Radio\"}",
@@ -84,6 +122,8 @@ int main(void)
 	assert(strstr(reply, "\"count\":1,"));
 	assert(strstr(reply, "\"offset\":0,"));
 	assert(strstr(reply, "\"playlist_tracks\":1,"));
+	assert(strstr(reply, "\"playlist repeat\":0,"));
+	assert(strstr(reply, "\"playlist shuffle\":0,"));
 
 	/* An exact repeat refreshes the lease but emits no visible-state
 	 * change. */
