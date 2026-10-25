@@ -5,6 +5,10 @@ add_executable(test_nowplaying nowplaying/test_nowplaying.c ../native/sbbase/src
 target_include_directories(test_nowplaying PRIVATE ../native/sbbase/include)
 add_test(NAME nowplaying_unit COMMAND test_nowplaying)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_executable(test_artwork_settings images/test_artwork_settings.c
+    ../native/sbwebserver/src/settings.c)
+  target_include_directories(test_artwork_settings PRIVATE ../native/sbwebserver/src)
+  add_test(NAME artwork_settings_defaults COMMAND test_artwork_settings)
   find_package(Threads REQUIRED)
   add_executable(test_http_trace images/test_http_trace.c)
   target_link_libraries(test_http_trace PRIVATE Threads::Threads)

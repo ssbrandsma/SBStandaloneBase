@@ -39,6 +39,7 @@ void settings_load(Settings *s)
 	FILE *f;
 	char k[80], v[1024], p[256];
 	memset(s, 0, sizeof(*s));
+    s->artwork_external_fallback_enabled=1;
     s->artwork_external_fallback_timeout=3;
     s->artwork_external_fallback_max_bytes=512u*1024u;
     snprintf(s->artwork_external_fallback_base_url,sizeof s->artwork_external_fallback_base_url,

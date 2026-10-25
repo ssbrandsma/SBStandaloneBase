@@ -187,7 +187,7 @@ existing `%20` correctly becomes `%2520` in the service path).
 Enabling the feature shares public artwork URL paths and permitted image
 query parameters with an external service, which can observe the request and
 source. Opaque credentials embedded in arbitrary URL paths cannot always be
-distinguished from image identifiers: use the disabled default for artwork
+distinguished from image identifiers: explicitly disable fallback for artwork
 sources whose paths must not be shared. Source cookies, authentication
 headers and local files are never forwarded. No complete payload is logged.
 
@@ -198,11 +198,17 @@ Use the existing `settings.conf` in the webserver config directory (normally
 preserve these fields. They are file settings, without new browser UI:
 
 ```ini
-artwork_external_fallback_enabled=0
+artwork_external_fallback_enabled=1
 artwork_external_fallback_base_url=https://api.lms-community.org/img/compatible/
 artwork_external_fallback_timeout=3
 artwork_external_fallback_max_bytes=524288
 ```
+
+Fallback is enabled by default when the setting is absent, including existing
+configuration files without that key. A saved `artwork_external_fallback_enabled=0`
+remains disabled. This is a Standalone Base webserver setting, not a Radio applet
+setting. Local processing remains first; external requests occur only on eligible
+failures. The change requires an updated webserver binary.
 
 The base URL must be a public credential-free HTTPS URL ending in `/`, with
 no query. Invalid values disable the attempt; size and timeout settings are
@@ -266,7 +272,8 @@ returned HTTP 200, image/jpeg, 28,713 bytes and 240x238 pixels, independently
 decoded on the host. Local progressive JPEG remains the primary path.
 
 Device validation (192.168.1.225): fallback is enabled in its existing
-settings.conf for testing, while the default remains disabled elsewhere.
+settings.conf for testing; the default was disabled at that time. It is now
+enabled by default as described above, while explicit opt-outs remain respected.
 Only sbwebserver was replaced; the progressive-capable renderer and other
 services were retained. Previous binary/config were backed up under
 `/mnt/storage/artwork-fallback-backup-20261023-124144`.

@@ -222,7 +222,7 @@ function menu(self)
     menu:addItem({text="Extended Storage",callback=function() self:storageMenu() end})
     menu:addItem({text="Web Access",callback=function() if not self.remoteBridge:isInjecting() then self:webAccessMenu() end end})
     menu:addItem({text="Custom Firmware Updates",callback=function() self.firmwareUpdates:menu() end})
-	menu:addItem({text="Version: 0.6.3"})
+	menu:addItem({text="Version: 0.6.4"})
     window:addWidget(menu); window:show()
 end
 function webAccessMenu(self)
