@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../native/sbproxy/tls_policy.h"
 
 typedef struct {
 	size_t bytes;
@@ -71,6 +72,7 @@ int main(int argc, char **argv)
 	curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
 	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+	curl_easy_setopt(curl, CURLOPT_SSL_CIPHER_LIST, SBPROXY_TLS12_CIPHERS);
 	curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, error);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, discard_body);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &state);

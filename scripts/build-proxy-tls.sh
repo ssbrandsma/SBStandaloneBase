@@ -1,5 +1,5 @@
 #!/bin/sh
-# Rebuild only wolfSSL's bounded RSA math capacity; retain the existing curl SDK.
+# Rebuild wolfSSL's bounded RSA capacity and legacy AES-GCM key exchange.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 sdk=${SBHTTPSPROXY_ROOT:-/mnt/c/Projects/SBHttpsProxy}
@@ -12,7 +12,7 @@ cc="$toolchain/bin/arm-buildroot-linux-musleabi-gcc"
 test -x "$cc"
 test -x "$cmake"
 grep -q 'LIBWOLFSSL_VERSION_STRING "5.8.2"' "$source/wolfssl/version.h"
-flags='-Os -marm -march=armv5te -mtune=arm926ej-s -mfloat-abi=soft -ffunction-sections -fdata-sections -DWOLFSSL_NO_ASN_STRICT -DSP_INT_BITS=4096'
+flags='-Os -marm -march=armv5te -mtune=arm926ej-s -mfloat-abi=soft -ffunction-sections -fdata-sections -DWOLFSSL_NO_ASN_STRICT -DSP_INT_BITS=4096 -DWOLFSSL_STATIC_RSA'
 "$cmake" -S "$source" -B "$build" -DCMAKE_SYSTEM_NAME=Linux \
     -DCMAKE_SYSTEM_PROCESSOR=arm -DCMAKE_C_COMPILER="$cc" \
     -DCMAKE_INSTALL_PREFIX="$prefix" -DCMAKE_BUILD_TYPE=MinSizeRel \

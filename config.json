@@ -1,6 +1,6 @@
 {
   "catalog_version": "1",
-  "standalone_base_version": "0.6.6",
+  "standalone_base_version": "0.6.7",
   "server": {
     "name": "Standalone Base",
     "uuid": "9d989f40-499a-4b85-b92f-8dc415af2a04",
@@ -15,13 +15,13 @@
     {
       "name": "StandaloneBase",
       "title": "Standalone Base",
-      "version": "0.6.6",
+      "version": "0.6.7",
       "target": "baby",
       "min_target_version": "7.7.2",
-      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.6.6.zip",
-      "sha": "b95ad0bca6c5dde52bc43f583b8a84fa90196892",
+      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.6.7.zip",
+      "sha": "fd40ca82416c9d0a0dcb7eeea7bd8be564a2736f",
       "desc": "Local LMS-compatible infrastructure services for Squeezebox Radio.",
-      "changes": "Filter Applet Installer results by device target to prevent duplicate Radio and Touch entries.",
+      "changes": "Fix HTTPS playback for legacy RSA/AES-GCM broadcasters such as Radio Enciclopedia, retaining TLS 1.3 and device-target filtering.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     },

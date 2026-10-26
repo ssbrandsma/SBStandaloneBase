@@ -27,6 +27,7 @@
 #include "../common/http_trace.h"
 #include "hls.h"
 #include "tls_diagnostics.h"
+#include "tls_policy.h"
 
 /** Enforce opt-in public destinations on actual sockets, including redirects.
  */
@@ -63,7 +64,7 @@ static curl_socket_t public_image_socket(void *data,
 	return socket(address->family, address->socktype, address->protocol);
 }
 
-#define VERSION "0.6.6"
+#define VERSION "0.6.7"
 
 #define MAX_REQUEST 16384
 #define MAX_HEADERS 32768
@@ -733,6 +734,10 @@ static void configure_curl(CURL *curl,
 	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
 
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+	/* Legacy RSA is permitted only with authenticated AES-GCM encryption;
+	 * modern defaults remain preferred. This does not change TLS versions. */
+	curl_easy_setopt(curl, CURLOPT_SSL_CIPHER_LIST, SBPROXY_TLS12_CIPHERS);
 
 	curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
 

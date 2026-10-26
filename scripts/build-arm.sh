@@ -25,7 +25,9 @@ test -f "$tls_prefix/lib/libcurl.a" || { echo "Missing static libcurl in $tls_pr
 test -f "$tls_prefix/lib/libwolfssl.a" || { echo "Missing static wolfSSL in $tls_prefix" >&2; exit 1; }
 wolf_prefix="${ARM_WOLFSSL_PREFIX:-$root/build-proxy-tls/prefix}"
 if [ ! -f "$wolf_prefix/sbproxy-rsa-capacity" ] ||
-   [ "$(tr -d '\r\n' < "$wolf_prefix/sbproxy-rsa-capacity")" != 4096 ]; then
+   [ "$(tr -d '\r\n' < "$wolf_prefix/sbproxy-rsa-capacity")" != 4096 ] ||
+   [ ! -f "$wolf_prefix/sbproxy-static-rsa" ] ||
+   [ "$(tr -d '\r\n' < "$wolf_prefix/sbproxy-static-rsa")" != aes-gcm-v1 ]; then
   SBHTTPSPROXY_ROOT="$SBHTTPSPROXY_ROOT" sh "$root/scripts/build-proxy-tls.sh"
 fi
 test -f "$wolf_prefix/lib/libwolfssl.a"

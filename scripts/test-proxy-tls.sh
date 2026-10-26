@@ -9,6 +9,7 @@ wolf_prefix=${ARM_WOLFSSL_PREFIX:-$root/build-proxy-tls/prefix}
 cc="$toolchain/bin/arm-buildroot-linux-musleabi-gcc"
 out="$root/build-proxy-tls/tests"
 test "$(tr -d '\r\n' < "$wolf_prefix/sbproxy-rsa-capacity")" = 4096
+test "$(tr -d '\r\n' < "$wolf_prefix/sbproxy-static-rsa")" = aes-gcm-v1
 mkdir -p "$out"
 flags='-static -Os -marm -march=armv5te -mtune=arm926ej-s -mfloat-abi=soft -pthread'
 for name in probe diagnostics; do
@@ -22,3 +23,4 @@ for name in probe diagnostics; do
 done
 qemu-arm -cpu arm926 "$out/diagnostics"
 python3 "$root/tests/tls/test_rsa_capacity.py" "$out/probe"
+python3 "$root/tests/tls/test_legacy_rsa.py" "$out/probe"

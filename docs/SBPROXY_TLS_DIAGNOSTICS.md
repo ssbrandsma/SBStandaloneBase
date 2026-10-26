@@ -1,5 +1,9 @@
 # sbproxy TLS diagnostics and NPO Radio 2 RSA capacity fix
 
+For the separate Teveo static-RSA cipher mismatch and its limited AES-GCM
+compatibility policy, see [legacy broadcaster TLS](SBPROXY_LEGACY_RSA.md).
+The capacity-only correction described below predates that change.
+
 ## Confirmed root cause
 
 Investigated on 23 October 2026 using Radio 192.168.1.225 (firmware

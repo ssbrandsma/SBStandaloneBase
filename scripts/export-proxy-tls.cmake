@@ -10,5 +10,9 @@ file(APPEND "${SB_TLS_PREFIX}/include/wolfssl/options.h" "
 #ifndef SP_INT_BITS
 #define SP_INT_BITS 4096
 #endif
+#ifndef WOLFSSL_STATIC_RSA
+#define WOLFSSL_STATIC_RSA
+#endif
 ")
 file(WRITE "${SB_TLS_PREFIX}/sbproxy-rsa-capacity" "4096\n")
+file(WRITE "${SB_TLS_PREFIX}/sbproxy-static-rsa" "aes-gcm-v1\n")
