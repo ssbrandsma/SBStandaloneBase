@@ -45,15 +45,19 @@ try:
     assert events[0] == {"id": 7, "channel": "/slim/request",
                          "successful": True}
     assert events[1]["channel"] == response_path
-    assert events[1]["data"] == ["menustatus", [], "add", PLAYER]
+    menu_event = events[1]["data"]
+    assert menu_event[0] == "menustatus" and menu_event[2:] == ["add", PLAYER]
+    assert menu_event[1][0]["id"] == "settingsAlarm"
+    alarm_item = menu_event[1][0]
 
     events = post({
         "id": 8, "channel": "/slim/request", "clientId": client_id,
         "data": {"response": f"/{client_id}/slim/request",
                  "request": [PLAYER, ["menu", 0, 100, "direct:1"]]},
     })
-    assert events[1]["data"] == {"count": 0, "offset": 0,
-                                  "item_loop": []}
+    assert events[1]["data"]["count"] == 2
+    assert events[1]["data"]["item_loop"][0] == alarm_item
+    assert events[1]["data"]["item_loop"][1]["id"] == "settingsSleep"
 finally:
     process.terminate()
     _, errors = process.communicate(timeout=3)

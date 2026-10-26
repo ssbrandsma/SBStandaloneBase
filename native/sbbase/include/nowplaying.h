@@ -94,6 +94,13 @@ int np_public_json(np_manager *m, char *out, size_t cap);
 /* Handle an LMS command array inside a Comet message. Returns 1 if handled. */
 int np_lms_query_json(
 	np_manager *m, const char *json, size_t len, char *out, size_t cap);
+/* Decode one bounded Comet command array for native protocol modules. */
+int np_lms_arguments(const char *json,
+		     size_t len,
+		     char *player,
+		     size_t capacity,
+		     char arguments[][512],
+		     int maximum);
 
 /* Returns an HTTP status code and writes a JSON response. changed is set when
  * SqueezePlay-visible state changed. */

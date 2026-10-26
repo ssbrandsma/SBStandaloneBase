@@ -15,6 +15,17 @@ StandaloneBase is a three-process native runtime plus SqueezePlay applet for a L
 
 Browser management uses physical six-digit PIN pairing and short-lived HttpOnly sessions; see [Web Access pairing](docs/WEB_ACCESS_PAIRING.md).
 
+The local LMS service now supplies the stock **Settings → Alarm Clock** menus
+and alarm scheduling, reusing the Radio's resident AlarmSnooze UI and fallback
+sound. See [alarms](docs/ALARMS.md) for sources, persistence, tests and the
+physical acceptance checklist. Hardware validation is still pending.
+
+The local **Settings → Sleep** menu provides a monotonic sleep countdown.
+The browser's **Settings → Backup & Restore** section exports and validates
+configuration-only backups and can restore them with a SqueezePlay restart.
+See [sleep timer](docs/SLEEP_TIMER.md) and [backup/restore](docs/BACKUP_RESTORE.md)
+for behavior, exclusions and the remaining physical test checklist.
+
 SVG artwork can be converted through the local image endpoint and standalone
 ARMv5 renderer; see [SVG rendering](docs/SVG_RENDERING.md).
 

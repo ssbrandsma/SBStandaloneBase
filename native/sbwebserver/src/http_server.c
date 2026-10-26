@@ -21,6 +21,7 @@
 #include "monitor.h"
 #include "image_render.h"
 #include "firmware.h"
+#include "backup.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -566,6 +567,10 @@ normal(Server *s, struct mg_connection *c, struct mg_http_message *m)
 		error(c, 401, "Browser pairing required");
 		return;
 	}
+	if (backup_handle(c, m, x.readonly)) return;
+	if (backup_busy() && !is(m->method,"GET") && !is(m->method,"HEAD")) {
+		error(c,423,"Configuration restore is in progress");return;
+	}
 	if (firmware_handle(c, m, 0, x.readonly))
 		return;
 	if (remote_handle(c, m, x.readonly))
@@ -730,6 +735,7 @@ static void fn(struct mg_connection *c, int ev, void *data)
 	Upload *u = up(s, c->id, 0);
 	if (ev == MG_EV_HTTP_HDRS) {
 		struct mg_http_message *m = data;
+		if (backup_headers(c, m)) return;
 		if (image_render_headers(c, m))
 			return;
 		if (is(m->uri, "/api/applets/upload") && is(m->method, "POST"))

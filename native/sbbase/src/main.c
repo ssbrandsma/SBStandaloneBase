@@ -10,6 +10,8 @@
 
 #include "sbbase.h"
 #include "nowplaying.h"
+#include "alarms.h"
+#include "sleep.h"
 #include "../../common/firmware_state.h"
 
 #include <arpa/inet.h>
@@ -63,6 +65,7 @@ typedef struct {
 static int player_connected;
 static int test_nowplaying;
 static np_manager *nowplaying;
+static sb_alarms *alarms;
 
 static char player_id[18];
 
@@ -72,6 +75,7 @@ typedef struct {
 	char client_id[32], channel[160], version[64], machine[16], last[512];
 	time_t seen;
 } firmware_subscription;
+
 static firmware_subscription firmware_subscriptions[CLIENTS];
 
 static char catalog_data[16384] = "{\"count\":0,\"item_loop\":[]}";
@@ -292,6 +296,8 @@ static void stream_event(client *c, const char *body)
 static void player_status_json(char *out, size_t cap)
 {
 	np_playerstatus_json(nowplaying, out, cap);
+	sb_alarms_status(alarms, out, cap, time(NULL));
+	sb_sleep_status(out, cap, np_monotonic_ms());
 }
 
 /**
@@ -413,52 +419,77 @@ static void register_playerstatus(const char *path)
 			cid);
 }
 
-/** Construct the exact optional firmware result, gated by private device state. */
-static void firmware_payload(const char *version, const char *machine,
-			     char *out, size_t capacity)
+/** Construct the exact optional firmware result, gated by private device state.
+ */
+static void firmware_payload(const char *version,
+			     const char *machine,
+			     char *out,
+			     size_t capacity)
 {
 	char url[256], installed[64];
 	if (!strcmp(machine, "baby") && sb_firmware_state(url, installed) &&
 	    !strcmp(version, installed))
-		snprintf(out, capacity, "{\"firmwareUrl\":\"%s\",\"firmwareUpgrade\":0}", url);
+		snprintf(out,
+			 capacity,
+			 "{\"firmwareUrl\":\"%s\",\"firmwareUpgrade\":0}",
+			 url);
 	else
 		snprintf(out, capacity, "{\"firmwareUpgrade\":0}");
 }
 
-/** Extract one literal command parameter; escaped/oversized values fail closed. */
-static void firmware_parameter(const char *message, const char *end, const char *name,
-			       char *out, size_t capacity)
+/** Extract one literal command parameter; escaped/oversized values fail closed.
+ */
+static void firmware_parameter(const char *message,
+			       const char *end,
+			       const char *name,
+			       char *out,
+			       size_t capacity)
 {
 	out[0] = 0;
 	const char *p = strstr(message, name);
-	if (!p || p >= end) return;
+	if (!p || p >= end)
+		return;
 	p += strlen(name);
 	size_t length = strcspn(p, "\"\\\r\n");
-	if (!length || length >= capacity || p + length >= end || p[length] != '"') return;
+	if (!length || length >= capacity || p + length >= end ||
+	    p[length] != '"')
+		return;
 	memcpy(out, p, length);
 	out[length] = 0;
 }
 
-/** Register one bounded logical firmware subscription, independent of TCP fd. */
-static void firmware_subscribe(const char *path, const char *version,
-			       const char *machine, const char *payload)
+/** Register one bounded logical firmware subscription, independent of TCP fd.
+ */
+static void firmware_subscribe(const char *path,
+			       const char *version,
+			       const char *machine,
+			       const char *payload)
 {
-	if (path[0] != '/' || strlen(path) >= 160) return;
+	if (path[0] != '/' || strlen(path) >= 160)
+		return;
 	const char *slash = strchr(path + 1, '/');
-	if (!slash || strcmp(slash, "/slim/firmwarestatus")) return;
+	if (!slash || strcmp(slash, "/slim/firmwarestatus"))
+		return;
 	size_t length = (size_t)(slash - path - 1);
-	if (!length || length >= 32) return;
+	if (!length || length >= 32)
+		return;
 	for (const char *p = path + 1; p < slash; p++)
-		if (!isalnum((unsigned char)*p) && *p != '-') return;
+		if (!isalnum((unsigned char)*p) && *p != '-')
+			return;
 	firmware_subscription *slot = NULL;
 	for (unsigned i = 0; i < CLIENTS; i++) {
 		firmware_subscription *s = &firmware_subscriptions[i];
-		if (strlen(s->client_id) == length && !memcmp(s->client_id, path + 1, length)) {
-			slot = s; break;
+		if (strlen(s->client_id) == length &&
+		    !memcmp(s->client_id, path + 1, length)) {
+			slot = s;
+			break;
 		}
-		if (!s->client_id[0] || time(NULL) - s->seen > HTTP_IDLE_SECONDS) slot = s;
+		if (!s->client_id[0] ||
+		    time(NULL) - s->seen > HTTP_IDLE_SECONDS)
+			slot = s;
 	}
-	if (!slot) return;
+	if (!slot)
+		return;
 	memcpy(slot->client_id, path + 1, length);
 	slot->client_id[length] = 0;
 	snprintf(slot->channel, sizeof slot->channel, "%s", path);
@@ -473,17 +504,26 @@ static void firmware_publish(const char *reconnected)
 {
 	for (unsigned i = 0; i < CLIENTS; i++) {
 		firmware_subscription *s = &firmware_subscriptions[i];
-		if (!s->client_id[0]) continue;
+		if (!s->client_id[0])
+			continue;
 		client *stream = stream_for_id(s->client_id);
 		if (!stream) {
-			if (time(NULL) - s->seen > HTTP_IDLE_SECONDS) memset(s, 0, sizeof *s);
+			if (time(NULL) - s->seen > HTTP_IDLE_SECONDS)
+				memset(s, 0, sizeof *s);
 			continue;
 		}
 		s->seen = time(NULL);
 		char payload[512], event[768];
-		firmware_payload(s->version, s->machine, payload, sizeof payload);
-		if ((!reconnected || strcmp(reconnected, s->client_id)) && !strcmp(payload, s->last)) continue;
-		snprintf(event, sizeof event, "[{\"channel\":\"%s\",\"data\":%s}]", s->channel, payload);
+		firmware_payload(
+			s->version, s->machine, payload, sizeof payload);
+		if ((!reconnected || strcmp(reconnected, s->client_id)) &&
+		    !strcmp(payload, s->last))
+			continue;
+		snprintf(event,
+			 sizeof event,
+			 "[{\"channel\":\"%s\",\"data\":%s}]",
+			 s->channel,
+			 payload);
 		stream_event(stream, event);
 		strcpy(s->last, payload);
 	}
@@ -501,7 +541,9 @@ static void unregister_playerstatus(const char *body)
 		return;
 	for (unsigned i = 0; i < CLIENTS; i++)
 		if (!strcmp(firmware_subscriptions[i].channel, path))
-			memset(&firmware_subscriptions[i], 0, sizeof firmware_subscriptions[i]);
+			memset(&firmware_subscriptions[i],
+			       0,
+			       sizeof firmware_subscriptions[i]);
 	if (!split_playerstatus_path(
 		    path, cid, sizeof cid, requested, sizeof requested))
 		return;
@@ -982,13 +1024,33 @@ request_responses(const char *body, const sb_config *cfg, char *out, size_t cap)
 		}
 		if (switched)
 			strcpy(data, "{}");
-		else if (np_lms_query_json(nowplaying,
-					   p,
-					   (size_t)(next - p),
-					   data,
-					   sizeof data)) {
-			if (before(p, "\"status\"", next))
+		else if (sb_sleep_request(p,
+					  (size_t)(next - p),
+					  player_id,
+					  data,
+					  sizeof data,
+					  np_monotonic_ms())) {
+			publish_playerstatus();
+		} else if (sb_alarms_request(alarms,
+					     p,
+					     (size_t)(next - p),
+					     player_id,
+					     data,
+					     sizeof data,
+					     time(NULL))) {
+			publish_playerstatus();
+		} else if (np_lms_query_json(nowplaying,
+					     p,
+					     (size_t)(next - p),
+					     data,
+					     sizeof data)) {
+			if (before(p, "\"status\"", next)) {
+				sb_alarms_status(
+					alarms, data, sizeof data, time(NULL));
+				sb_sleep_status(
+					data, sizeof data, np_monotonic_ms());
 				register_playerstatus(reply);
+			}
 		} else if (before(p, "serverstatus", next))
 			snprintf(data,
 				 sizeof data,
@@ -1004,11 +1066,17 @@ request_responses(const char *body, const sb_config *cfg, char *out, size_t cap)
 
 		else if (before(p, "firmwareupgrade", next)) {
 			char version[64], machine[16];
-			firmware_parameter(p, next, "firmwareVersion:", version, sizeof version);
-			firmware_parameter(p, next, "machine:", machine, sizeof machine);
+			firmware_parameter(p,
+					   next,
+					   "firmwareVersion:",
+					   version,
+					   sizeof version);
+			firmware_parameter(
+				p, next, "machine:", machine, sizeof machine);
 			firmware_payload(version, machine, data, sizeof data);
 			if (before(p, "subscribe:0", next))
-				firmware_subscribe(reply, version, machine, data);
+				firmware_subscribe(
+					reply, version, machine, data);
 		}
 
 		else if (before(p, "\"date\"", next))
@@ -1021,19 +1089,18 @@ request_responses(const char *body, const sb_config *cfg, char *out, size_t cap)
 		else if (before(p, "jiveapplets", next))
 			snprintf(data, sizeof data, "%s", catalog_data);
 
-		/* SlimMenus waits for the initial menustatus subscription
-		 * result before it considers the connected server's Home menu
-		 * loaded. An empty menu is valid, but it must use LMS'
-		 * notification-array shape. */
+		/* SlimMenus requires LMS' notification-array shape before it
+		 * considers the server menu loaded. Alarm Clock is
+		 * server-owned; the stock device applet supplies its
+		 * wake-up/popup behavior. */
 		else if (before(p, "menustatus", next))
-			snprintf(data,
-				 sizeof data,
-				 "[\"menustatus\",[],\"add\",\"%s\"]",
-				 player_id[0] ? player_id : "all");
+			sb_alarms_menu(data,
+				       sizeof data,
+				       player_id[0] ? player_id : "all",
+				       1);
 
 		else if (before(p, "\"menu\"", next))
-			strcpy(data,
-			       "{\"count\":0,\"offset\":0,\"item_loop\":[]}");
+			sb_alarms_menu(data, sizeof data, player_id, 0);
 
 		else if (before(p, "\"status\"", next)) {
 			player_status_json(data, sizeof data);
@@ -1381,7 +1448,9 @@ static void handle_http(client *c, const sb_config *cfg)
 	} else if (strstr(channel, "/meta/disconnect")) {
 		for (unsigned n = 0; n < CLIENTS; n++)
 			if (!strcmp(firmware_subscriptions[n].client_id, cid))
-				memset(&firmware_subscriptions[n], 0, sizeof firmware_subscriptions[n]);
+				memset(&firmware_subscriptions[n],
+				       0,
+				       sizeof firmware_subscriptions[n]);
 		keep_response = 0;
 		snprintf(response,
 			 sizeof response,
@@ -1571,6 +1640,23 @@ int main(int argc, char **argv)
 	}
 
 	signal(SIGINT, stop);
+	char alarm_path[512] = "";
+	if (cfg.catalog_path[0]) {
+		const char *slash = strrchr(cfg.catalog_path, '/');
+		if (slash)
+			snprintf(alarm_path,
+				 sizeof alarm_path,
+				 "%.*s/alarms.conf",
+				 (int)(slash - cfg.catalog_path),
+				 cfg.catalog_path);
+		else
+			snprintf(alarm_path, sizeof alarm_path, "alarms.conf");
+	}
+	alarms = sb_alarms_open(alarm_path);
+	if (!alarms) {
+		fputs("alarms: out of memory\n", stderr);
+		return 1;
+	}
 	signal(SIGTERM, stop);
 	signal(SIGHUP, reload);
 	signal(SIGPIPE, SIG_IGN);
@@ -1623,6 +1709,22 @@ int main(int argc, char **argv)
 
 		if (np_expire(nowplaying))
 			publish_playerstatus();
+		int alarm_connected = 0;
+		for (i = 0; i < CLIENTS; i++)
+			if (cs[i].fd >= 0 && cs[i].kind == 1 && cs[i].helo &&
+			    !strcmp(cs[i].slim_player, player_id))
+				alarm_connected = 1;
+		if (sb_alarms_tick(alarms,
+				   time(NULL),
+				   np_monotonic_ms(),
+				   alarm_connected))
+			publish_playerstatus();
+		if (sb_alarms_active(alarms) && sb_sleep_cancel())
+			publish_playerstatus();
+		if (sb_sleep_tick(np_monotonic_ms(), alarm_connected)) {
+			np_queue_command(nowplaying, "stop", 0);
+			publish_playerstatus();
+		}
 		firmware_publish(NULL);
 
 		if (pf[0].revents & POLLIN) {
@@ -1743,5 +1845,6 @@ int main(int argc, char **argv)
 	close(tcp);
 	close(http);
 	np_destroy(nowplaying);
+	sb_alarms_close(alarms);
 	return 0;
 }

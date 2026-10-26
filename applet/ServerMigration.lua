@@ -56,4 +56,20 @@ function M.migrateLiveSettings(chooseSettings, discoverySettings)
     return changedChoose, changedDiscovery
 end
 
+-- Recover only a disconnected remembered player attached to the local Base
+-- identity. Never replace a real remote server/player or an unconfigured device.
+function M.localPlayerForOrphanSelection(settings, current, localPlayer)
+    if not settings or settings.serverUuid ~= M.LOCAL_UUID
+        or not settings.serverInit or settings.serverInit.ip ~= M.LOCAL_IP
+        or not settings.playerInit or settings.playerInit.model ~= "baby"
+        or not current or not localPlayer or current == localPlayer then return nil end
+    if not localPlayer:isLocal() or current:isLocal() or current:getSlimServer()
+        or current.config == "needsServer" then return nil end
+    local id = current:getId()
+    if settings.playerId ~= id or (settings.currentPlayer and settings.currentPlayer ~= id) then return nil end
+    local server = localPlayer:getSlimServer()
+    if not server or server.id ~= M.LOCAL_UUID then return nil end
+    return localPlayer
+end
+
 return M

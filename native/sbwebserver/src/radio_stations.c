@@ -83,6 +83,9 @@ static const char *root(void)
 	return e && *e ? e : "/mnt/storage/standalonebase/radio";
 }
 
+/** Expose the existing storage selection to the configuration backup module. */
+const char *radio_config_root(void) { return root(); }
+
 /**
  * @brief Build a path below the active configuration root.
  * @param out Destination buffer for the result.
@@ -694,6 +697,15 @@ static char *read_file(size_t *z, int *missing, char *e, size_t en)
  * @param en Size or count for en.
  * @return Zero on success; otherwise a nonzero status or error code.
  */
+/** Validate restored station data with the same schema and URL rules as imports. */
+int radio_validate_backup(struct mg_str data)
+{
+    Config c = {0}; char error[300];
+    int result = parse_config(data, &c, error, sizeof error);
+    free_cfg(&c);
+    return result == 0;
+}
+
 static int load(Config *c, char *e, size_t en)
 {
 	size_t z = 0;

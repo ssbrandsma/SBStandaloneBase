@@ -1,6 +1,6 @@
 {
   "catalog_version": "1",
-  "standalone_base_version": "0.6.4",
+  "standalone_base_version": "0.6.5",
   "server": {
     "name": "Standalone Base",
     "uuid": "9d989f40-499a-4b85-b92f-8dc415af2a04",
@@ -15,13 +15,13 @@
     {
       "name": "StandaloneBase",
       "title": "Standalone Base",
-      "version": "0.6.4",
+      "version": "0.6.5",
       "target": "baby",
       "min_target_version": "7.7.2",
-      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.6.4.zip",
-      "sha": "ba68a3f098a982567c0ee75065a3c1471faa3a8b",
+      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.6.5.zip",
+      "sha": "e919b9bc4299bf527df5536be99120dd4fcd9dc0",
       "desc": "Local LMS-compatible infrastructure services for Squeezebox Radio.",
-      "changes": "Enable bounded LMS Community artwork fallback by default for eligible local image failures, preserving explicit opt-outs.",
+      "changes": "Add local alarms, sleep timer, configuration backup and restore, and local player selection recovery.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     },

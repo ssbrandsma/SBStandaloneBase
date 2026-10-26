@@ -4,7 +4,16 @@ add_test(NAME protocol COMMAND test_protocol)
 add_executable(test_nowplaying nowplaying/test_nowplaying.c ../native/sbbase/src/nowplaying.c)
 target_include_directories(test_nowplaying PRIVATE ../native/sbbase/include)
 add_test(NAME nowplaying_unit COMMAND test_nowplaying)
+add_executable(test_alarms alarms/test_alarms.c
+  ../native/sbbase/src/alarms.c ../native/sbbase/src/nowplaying.c)
+target_include_directories(test_alarms PRIVATE ../native/sbbase/include)
+add_test(NAME alarms_unit COMMAND test_alarms)
+add_executable(test_sleep alarms/test_sleep.c ../native/sbbase/src/sleep.c ../native/sbbase/src/nowplaying.c)
+target_include_directories(test_sleep PRIVATE ../native/sbbase/include)
+add_test(NAME sleep_unit COMMAND test_sleep)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_library(backup_rename_fault SHARED backup/fault_rename.c)
+  target_link_libraries(backup_rename_fault PRIVATE dl)
   add_executable(test_artwork_settings images/test_artwork_settings.c
     ../native/sbwebserver/src/settings.c)
   target_include_directories(test_artwork_settings PRIVATE ../native/sbwebserver/src)
@@ -35,6 +44,8 @@ add_test(NAME extended_storage COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/storage/te
   ${CMAKE_SOURCE_DIR}/artifacts/ubi/sbdata-empty.ubifs)
 find_program(LUA_EXECUTABLE NAMES lua lua5.1)
 if(LUA_EXECUTABLE)
+  add_test(NAME alarm_playback_lua COMMAND ${LUA_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/alarms/test_playback.lua ${CMAKE_SOURCE_DIR})
   add_test(NAME firmware_physical_input COMMAND ${LUA_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/firmware/test_physical.lua ${CMAKE_SOURCE_DIR})
   add_test(NAME firmware_bridge_lua COMMAND ${LUA_EXECUTABLE}
@@ -104,7 +115,7 @@ if(NOT WIN32)
     endforeach()
     add_executable(sbwebserver_catalog_test ${CATALOG_TEST_SOURCES})
     target_include_directories(sbwebserver_catalog_test PRIVATE
-      ../native/sbwebserver/src ../native/sbwebserver/third_party)
+      ../native/sbwebserver/src ../native/sbwebserver/third_party ../native/sbbase/include)
     target_compile_definitions(sbwebserver_catalog_test PRIVATE _GNU_SOURCE SB_CATALOG_TESTING SB_FIRMWARE_TESTING SB_IMAGE_TESTING
       MG_ENABLE_EPOLL=0 MG_ENABLE_POLL=1 MG_ENABLE_DIRLIST=0 MG_ENABLE_SSI=0)
     find_package(ZLIB REQUIRED)
@@ -171,6 +182,8 @@ if(NOT WIN32)
         ${CMAKE_CURRENT_SOURCE_DIR}/images/test_proxy_guard.py $<TARGET_FILE:sbproxy>)
     endif()
     add_test(NAME comet_connections COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/comet/test_connections.py $<TARGET_FILE:sbbase>)
+    add_test(NAME alarms_comet COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/alarms/test_comet.py $<TARGET_FILE:sbbase>)
     add_test(NAME firmware_comet COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/firmware/test_comet.py $<TARGET_FILE:sbbase>)
     add_test(NAME comet_menustatus COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/comet/test_menustatus.py $<TARGET_FILE:sbbase>)
@@ -182,6 +195,8 @@ if(NOT WIN32)
     add_test(NAME remote_http COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/remote/test_remote_http.py $<TARGET_FILE:sbwebserver> ${CMAKE_SOURCE_DIR}/native/sbwebserver/web)
     add_test(NAME radio_management_http COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/radio/test_radio_http.py $<TARGET_FILE:sbwebserver> ${CMAKE_SOURCE_DIR}/native/sbwebserver/web)
     add_test(NAME web_access_pairing COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/auth/test_web_pairing.py $<TARGET_FILE:sbwebserver> ${CMAKE_SOURCE_DIR}/native/sbwebserver/web)
+    add_test(NAME configuration_backup COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/backup/test_backup.py $<TARGET_FILE:sbwebserver> ${CMAKE_SOURCE_DIR}/native/sbwebserver/web $<TARGET_FILE:backup_rename_fault>)
     add_test(NAME system_log_viewer COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/logs/test_logs_http.py $<TARGET_FILE:sbwebserver> ${CMAKE_SOURCE_DIR}/native/sbwebserver/web)
     add_test(NAME process_monitor COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/monitor/test_monitor_http.py $<TARGET_FILE:sbwebserver> ${CMAKE_SOURCE_DIR}/native/sbwebserver/web)
     add_test(NAME cpu_accounting_diagnostic COMMAND ${Python3_EXECUTABLE}

@@ -35,13 +35,14 @@ mkdir -p "$out"
 
 "$cc" -static $flags -std=c99 -Wall -Wextra -Wpedantic -Wl,--gc-sections \
   -I"$root/native/sbbase/include" "$root/native/sbbase/src/main.c" \
-  "$root/native/sbbase/src/protocol.c" "$root/native/sbbase/src/nowplaying.c" -o "$out/sbbase"
+  "$root/native/sbbase/src/protocol.c" "$root/native/sbbase/src/nowplaying.c" \
+  "$root/native/sbbase/src/alarms.c" "$root/native/sbbase/src/sleep.c" -o "$out/sbbase"
 
 "$cc" -static $flags -std=c99 -Wall -Wextra -pthread -Wl,--gc-sections \
   -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -DMG_ENABLE_EPOLL=0 -DMG_ENABLE_POLL=1 \
-  -DMG_ENABLE_DIRLIST=0 -DMG_ENABLE_SSI=0 -I"$root/native/sbwebserver/src" -I"$image_prefix/include" \
+  -DMG_ENABLE_DIRLIST=0 -DMG_ENABLE_SSI=0 -I"$root/native/sbwebserver/src" -I"$image_prefix/include" -I"$root/native/sbbase/include" \
   -I"$root/native/sbwebserver/third_party" "$root/native/sbwebserver/src/"*.c \
-  "$root/native/sbwebserver/third_party/mongoose.c" "$image_prefix/lib/libz.a" -o "$out/sbwebserver"
+  "$root/native/sbwebserver/third_party/mongoose.c" "$root/native/sbbase/src/alarms.c" "$root/native/sbbase/src/nowplaying.c" "$image_prefix/lib/libz.a" -o "$out/sbwebserver"
 
 "$cc" -static $flags -std=c99 -Wall -Wextra -Wpedantic -pthread -Wl,--gc-sections \
   -D_GNU_SOURCE -I"$wolf_prefix/include" -I"$tls_prefix/include" "$root/native/sbproxy/sbproxy.c" \

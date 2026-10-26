@@ -618,7 +618,8 @@ int np_playerstatus_json(np_manager *m, char *out, size_t cap)
 				"connected\":1,\"power\":1,\"mode\":\"stop\","
 				"\"time\":0,\"duration\":0,\"playlist_tracks\":"
 				"0,\"count\":0,\"offset\":0,\"playlist_cur_"
-				"index\":0,\"playlist repeat\":0,\"playlist shuffle\":0,\"mixer "
+				"index\":0,\"playlist repeat\":0,\"playlist "
+				"shuffle\":0,\"mixer "
 				"volume\":50,\"digital_volume_control\":1,"
 				"\"player_needs_upgrade\":0,\"player_is_"
 				"upgrading\":0,\"seq_no\":0}");
@@ -1814,10 +1815,60 @@ overflow:
 	return -1;
 }
 
-/** Parse current-track LMS queries from a Comet message using bounded JSON
- * tokens. m owns the snapshot; json/len delimit one message; out/cap receive
- * valid JSON. Returns zero for other commands, one for handled queries
- * (including errors).
+/** Decode a bounded LMS request for other sbbase protocol modules.
+ * json/len delimit one Comet message; player/capacity receive its player id;
+ * arguments/maximum receive decoded command tokens. Returns token count or -1
+ * for malformed input, nested arguments or capacity exhaustion.
+ */
+int np_lms_arguments(const char *json,
+		     size_t len,
+		     char *player,
+		     size_t capacity,
+		     char arguments[][512],
+		     int maximum)
+{
+	jtok tokens[JTOKENS];
+	int n, data, request, args, i, count = 0;
+	if (len > 16384 || maximum < 1)
+		return -1;
+	n = parse_json(json, len, tokens, JTOKENS);
+	if (n < 0)
+		return -1;
+	data = member(json, tokens, n, 0, "data");
+	request = member(json, tokens, n, data, "request");
+	if (request < 0 || tokens[request].type != J_ARRAY)
+		return -1;
+	i = request + 1;
+	if (i >= n || !string_value(json, &tokens[i], player, capacity))
+		return -1;
+	args = subtree(tokens, n, i);
+	if (args >= n || tokens[args].type != J_ARRAY)
+		return -1;
+	for (i = args + 1; i < n && tokens[i].start < tokens[args].end; i++) {
+		if (count == maximum)
+			return -1;
+		if (tokens[i].type == J_STRING) {
+			if (!string_value(
+				    json, &tokens[i], arguments[count], 512))
+				return -1;
+		} else if (tokens[i].type == J_PRIMITIVE &&
+			   tokens[i].end - tokens[i].start < 512) {
+			size_t length =
+				(size_t)(tokens[i].end - tokens[i].start);
+			memcpy(arguments[count],
+			       json + tokens[i].start,
+			       length);
+			arguments[count][length] = 0;
+		} else
+			return -1;
+		count++;
+	}
+	return count;
+}
+
+/** Parse current-track LMS queries from one Comet message.
+ * m owns the snapshot; json/len delimit the request; out/cap receive JSON.
+ * Returns zero for unrelated commands, one for handled queries/errors.
  */
 int np_lms_query_json(
 	np_manager *m, const char *json, size_t len, char *out, size_t cap)

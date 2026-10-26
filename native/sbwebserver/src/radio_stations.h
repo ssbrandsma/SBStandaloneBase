@@ -9,5 +9,7 @@ void radio_applet_cache_invalidate(void);
 int radio_is_api(struct mg_str uri);
 /* Handles an authenticated /api/radio request. Returns non-zero if handled. */
 int radio_handle(struct mg_connection *c, struct mg_http_message *m);
+const char *radio_config_root(void);
+int radio_validate_backup(struct mg_str data);
 
 #endif

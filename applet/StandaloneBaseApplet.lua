@@ -6,6 +6,8 @@ local Textarea = require("jive.ui.Textarea")
 local Window = require("jive.ui.Window")
 local Timer = require("jive.ui.Timer")
 local SlimServer = require("jive.slim.SlimServer")
+local Player = require("jive.slim.Player")
+local migrationLog = require("jive.utils.log").logger("StandaloneBase")
 local StorageManager = require("applets.StandaloneBase.StorageManager")
 local ExtendedStorageState = require("applets.StandaloneBase.ExtendedStorageState")
 local TimeSync = require("applets.StandaloneBase.TimeSync")
@@ -17,9 +19,11 @@ local Artwork = require("applets.StandaloneBase.Artwork")
 local InstallerCompat = require("applets.StandaloneBase.InstallerCompat")
 local HttpTrace = require("applets.StandaloneBase.HttpTrace")
 local FirmwareUpdates = require("applets.StandaloneBase.FirmwareUpdates")
+local AlarmPlayback = require("applets.StandaloneBase.AlarmPlayback")
 local io, os, tonumber, tostring = io, os, tonumber, tostring
 local ipairs, pairs, math, pcall, string = ipairs, pairs, math, pcall, string
 local appletManager = appletManager
+local jnt = jnt
 module(..., Framework.constants)
 oo.class(_M, Applet)
 
@@ -32,6 +36,7 @@ local SERVICES = {
     { name="Webserver", exe="sbwebserver", args="--web-root "..ROOT.." --config-dir /mnt/storage/standalonebase" },
 }
 local started = false
+local checkedInitialPlayerSelection = false
 
 function getStandaloneImageURL(self, url, width, height, mime)
     return ImageRender.artworkUrl(url, width, height, mime)
@@ -129,6 +134,21 @@ local function connectToLocalServer()
     pcall(function() localServer:connect() end)
     local ok,player=pcall(function() return appletManager:callService("getCurrentPlayer") end)
     if not ok or not player then return false end
+    if not checkedInitialPlayerSelection then
+        local localPlayer = Player:getLocalPlayer()
+        if localPlayer and localPlayer:getSlimServer() then
+            checkedInitialPlayerSelection = true
+            local discovery = appletManager:loadApplet("SlimDiscovery")
+            local replacement = ServerMigration.localPlayerForOrphanSelection(
+                discovery and discovery:getSettings(), player, localPlayer)
+            if replacement then
+                migrationLog:info("StandaloneBase: recovering stale local player selection ",
+                    player:getId(), " -> ", replacement:getId())
+                Player:setCurrentPlayer(replacement)
+                player = replacement
+            end
+        end
+    end
     local current=player:getSlimServer()
     if current ~= localServer and current
         and (current.id == ServerMigration.BOOTSTRAP_UUID or current:getName() == ServerMigration.BOOTSTRAP_NAME) then
@@ -180,6 +200,8 @@ function init(self)
     self.timeSync=TimeSync.new(); self.timeSync:start()
     self.remoteBridge=RemoteBridge(); self.remoteBridge:init()
     self.firmwareUpdates=FirmwareUpdates.new(self,self.remoteBridge); self.firmwareUpdates:start()
+    self.alarmPlayback=AlarmPlayback.new()
+    jnt:subscribe(self.alarmPlayback)
     redirectLiveBootstrapServer()
     self.monitor=Timer(15000,function() self:supervise() end); self.monitor:start()
     -- A firmware upgrade can leave sbdata intact while removing its boot
@@ -222,7 +244,7 @@ function menu(self)
     menu:addItem({text="Extended Storage",callback=function() self:storageMenu() end})
     menu:addItem({text="Web Access",callback=function() if not self.remoteBridge:isInjecting() then self:webAccessMenu() end end})
     menu:addItem({text="Custom Firmware Updates",callback=function() self.firmwareUpdates:menu() end})
-	menu:addItem({text="Version: 0.6.4"})
+	menu:addItem({text="Version: 0.6.5"})
     window:addWidget(menu); window:show()
 end
 function webAccessMenu(self)

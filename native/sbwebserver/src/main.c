@@ -8,6 +8,7 @@
 
 #include "http_server.h"
 #include "settings.h"
+#include "backup.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -20,6 +21,8 @@
  */
 int main(int argc, char **argv)
 {
+	if (argc >= 3 && !strcmp(argv[1], "--apply-backup"))
+		return backup_apply(argv[2], argc == 4 && !strcmp(argv[3], "--restart-jive"));
 	Settings s;
 	settings_load(&s);
 	const char *root = "/usr/share/jive/applets/SBWebserver/web";
