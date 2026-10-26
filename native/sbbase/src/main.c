@@ -79,6 +79,12 @@ typedef struct {
 static firmware_subscription firmware_subscriptions[CLIENTS];
 
 static char catalog_data[16384] = "{\"count\":0,\"item_loop\":[]}";
+static struct {
+	size_t offset;
+	size_t length;
+	char target[64];
+} catalog_entries[64];
+static size_t catalog_entry_count;
 
 static sb_config *active_config;
 
@@ -781,6 +787,7 @@ static int load_catalog(const char *path)
 		return -1;
 	}
 	strcpy(catalog_data, "{\"count\":0,\"item_loop\":[");
+	catalog_entry_count = 0;
 	used = strlen(catalog_data);
 	for (p++; *p && *p != ']';) {
 		while (*p && *p != '{' && *p != ']')
@@ -811,8 +818,22 @@ static int load_catalog(const char *path)
 			free(b);
 			return -1;
 		}
+		if ((size_t)count >= sizeof catalog_entries / sizeof catalog_entries[0]) {
+			free(b);
+			return -1;
+		}
 		if (count)
 			catalog_data[used++] = ',';
+		catalog_entries[count].offset = used;
+		catalog_entries[count].length = (size_t)(p - start);
+		catalog_entries[count].target[0] = 0;
+		{
+			char saved = *p;
+			*p = 0;
+			json_string(start, "\"target\"", catalog_entries[count].target,
+				    sizeof catalog_entries[count].target);
+			*p = saved;
+		}
 		memcpy(catalog_data + used, start, (size_t)(p - start));
 		used += (size_t)(p - start);
 		catalog_data[used] = 0;
@@ -835,8 +856,48 @@ static int load_catalog(const char *path)
 		}
 		memcpy(catalog_data, prefix, old);
 	}
+	catalog_entry_count = (size_t)count;
 	free(b);
 	return count;
+}
+
+/**
+ * Return only applets compatible with the requesting device.
+ * @param target Requested model; missing target defaults to this Radio's baby.
+ * @param out Response JSON buffer.
+ * @param capacity Buffer size, including the terminator.
+ * Untargeted and wildcard entries are shared by all models. Capacity failures
+ * return an empty catalog rather than a partial or malformed JSON response.
+ */
+static void catalog_response(const char *target, char *out, size_t capacity)
+{
+	char header[64];
+	size_t i, used = 0, count = 0, length;
+
+	if (!target[0])
+		target = "baby";
+	for (i = 0; i < catalog_entry_count; i++) {
+		const char *model = catalog_entries[i].target;
+		if (model[0] && strcmp(model, "*") && strcmp(model, target))
+			continue;
+		length = catalog_entries[i].length;
+		if (used + length + 67 >= capacity)
+			goto empty;
+		if (count++)
+			out[used++] = ',';
+		memcpy(out + used, catalog_data + catalog_entries[i].offset, length);
+		used += length;
+	}
+	length = (size_t)snprintf(header, sizeof header,
+				 "{\"count\":%zu,\"item_loop\":[", count);
+	if (used + length + 3 > capacity)
+		goto empty;
+	memmove(out + length, out, used);
+	memcpy(out, header, length);
+	memcpy(out + length + used, "]}", 3);
+	return;
+empty:
+	snprintf(out, capacity, "{\"count\":0,\"item_loop\":[]}");
 }
 
 /**
@@ -1086,8 +1147,11 @@ request_responses(const char *body, const sb_config *cfg, char *out, size_t cap)
 				 "00:00+00:00\"}",
 				 (unsigned long)time(NULL));
 
-		else if (before(p, "jiveapplets", next))
-			snprintf(data, sizeof data, "%s", catalog_data);
+		else if (before(p, "jiveapplets", next)) {
+			char target[64];
+			firmware_parameter(p, next, "target:", target, sizeof target);
+			catalog_response(target, data, sizeof data);
+		}
 
 		/* SlimMenus requires LMS' notification-array shape before it
 		 * considers the server menu loaded. Alarm Clock is

@@ -1,6 +1,6 @@
 {
   "catalog_version": "1",
-  "standalone_base_version": "0.6.5",
+  "standalone_base_version": "0.6.6",
   "server": {
     "name": "Standalone Base",
     "uuid": "9d989f40-499a-4b85-b92f-8dc415af2a04",
@@ -15,13 +15,13 @@
     {
       "name": "StandaloneBase",
       "title": "Standalone Base",
-      "version": "0.6.5",
+      "version": "0.6.6",
       "target": "baby",
       "min_target_version": "7.7.2",
-      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.6.5.zip",
-      "sha": "e919b9bc4299bf527df5536be99120dd4fcd9dc0",
+      "url": "http://49.12.198.91/sbstandalonebase/StandaloneBase-0.6.6.zip",
+      "sha": "b95ad0bca6c5dde52bc43f583b8a84fa90196892",
       "desc": "Local LMS-compatible infrastructure services for Squeezebox Radio.",
-      "changes": "Add local alarms, sleep timer, configuration backup and restore, and local player selection recovery.",
+      "changes": "Filter Applet Installer results by device target to prevent duplicate Radio and Touch entries.",
       "creator": "Sjoerd Brandsma",
       "email": ""
     },

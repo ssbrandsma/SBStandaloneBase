@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path $PSScriptRoot -Parent
 if (-not $ConfigPath) { $ConfigPath = Join-Path $Root 'config.json' }
 if (-not $BaseUrl) { throw 'Set SB_RELEASE_BASE_URL or pass -BaseUrl; deployment endpoints are intentionally not stored in Git.' }
-$Version = '0.6.5'
+$Version = '0.6.6'
 $ModuleSize = 199119
 $ModuleSha256 = '63652ce67df06a78abb84a4986253bdab02fbd7b7c000779c60b3d393ba9566b'
 $ImageSize = 1806336
@@ -110,7 +110,7 @@ $Url = $BaseUrl.TrimEnd('/') + '/' + [IO.Path]::GetFileName($ZipPath)
 $Xml = @"
 <?xml version="1.0" encoding="UTF-8"?>
 <extensions><details><title lang="EN">StandaloneBase Applet Repository</title></details><applets>
-<applet name="StandaloneBase" version="$Version" target="baby" minTarget="7.7.2" maxTarget="*"><title lang="EN">Standalone Base</title><desc lang="EN">Local LMS-compatible infrastructure services for Squeezebox Radio.</desc><changes lang="EN">Add local alarms, sleep timer, configuration backup and restore, and local player selection recovery.</changes><creator>Sjoerd Brandsma</creator><url>$Url</url><sha>$Sha1</sha></applet>
+<applet name="StandaloneBase" version="$Version" target="baby" minTarget="7.7.2" maxTarget="*"><title lang="EN">Standalone Base</title><desc lang="EN">Local LMS-compatible infrastructure services for Squeezebox Radio.</desc><changes lang="EN">Filter Applet Installer results by device target to prevent duplicate Radio and Touch entries.</changes><creator>Sjoerd Brandsma</creator><url>$Url</url><sha>$Sha1</sha></applet>
 </applets></extensions>
 "@
 $Utf8 = New-Object Text.UTF8Encoding($false)
